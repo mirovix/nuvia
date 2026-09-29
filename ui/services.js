@@ -136,7 +136,7 @@ function signInSection(id) {
     const clear = current.saved ? h('button.btn.sm.ghost.danger', { type: 'button', on: { click: async () => { await api.signInClear(id); toast('Automatic sign-in turned off'); render(); } } }, 'Turn off') : null;
     fill(box,
       h('h3', 'Automatic sign-in', current.saved ? h('span.state.ok', { style: 'margin-left:8px' }, 'on') : null),
-      h('p.muted', 'When this service signs you out, Nuvia fills in these details on the sign-in pages (Google, university SSO, Microsoft). They are stored encrypted in the system keychain and used only for this service. Two-step verification still needs you.'),
+      h('p.muted', 'Saved automatically the first time you sign in here, or enter them now. When this service signs you out, Nuvia fills them in on the sign-in pages (Google, university SSO, Microsoft). They are encrypted in the system keychain and used only for this service. Two-step verification still needs you.'),
       h('div.field', username), h('div.field', password), h('div.inline', save, clear));
   };
   render();

@@ -44,6 +44,8 @@ function generalTab() {
   return [
     h('label.field', h('span', 'Name'), name, h('small', 'Only used for the greeting on the Overview.')),
     h('div.field', h('span', 'Weather city'), h('div.inline', city, saveCity)),
+    h('label.check', toggle(prefs.rememberSignIns !== false, value => { prefs.rememberSignIns = value; savePrefs(); }), 'Stay signed in automatically'),
+    h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'When you sign in to a service, Nuvia keeps your details encrypted in the system keychain and signs you back in when the session expires (for example a university account). Remove them per service in Edit service.'),
     h('label.check', toggle(prefs.googleSignInCompat !== false, value => { prefs.googleSignInCompat = value; savePrefs(); }), 'Google sign-in compatibility'),
     h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'Lets you sign in to Google accounts when Google says the browser may not be secure. Turn it off if a Google account keeps signing you out.'),
     h('label.check', toggle(prefs.systemNotifications !== false, value => { prefs.systemNotifications = value; savePrefs(); }), 'Also show notifications on the desktop')

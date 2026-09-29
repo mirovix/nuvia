@@ -239,7 +239,7 @@ async function createServiceView(service, key = service.id, url = service.url) {
   const serviceSession = prepareSession(service.id);
   await restoreSessionCookies(service.id);
   await loadExtensionsFor(serviceSession, service);
-  const view = new WebContentsView({ webPreferences: { partition: partitionFor(service.id), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: serviceKind(service) !== 'spotify' } });
+  const view = new WebContentsView({ webPreferences: { partition: partitionFor(service.id), preload: join(import.meta.dirname, 'preload-service.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: serviceKind(service) !== 'spotify' } });
   view.setBackgroundColor('#ffffff');
   // Background views still need a real viewport: at 0x0 lazy lists (agenda, chats) render nothing.
   view.setBounds(hostBounds);
@@ -358,7 +358,7 @@ async function watchSignIn(service, contents) {
     // Only warn about services that were signed in before, at most every 2 hours.
     if (state.signedIn && Date.now() - state.noticeAt > 2 * 3600000) {
       state.noticeAt = Date.now();
-      addNotification({ title: service.name, body: 'Your session expired. Open the service to sign in again, or turn on automatic sign-in in Edit service.', type: 'warning', serviceId: service.id });
+      addNotification({ title: service.name, body: 'Your session expired. Open the service and sign in once: Nuvia will remember it and reconnect automatically next time.', type: 'warning', serviceId: service.id });
     }
     return;
   }
@@ -703,6 +703,30 @@ handle('services:reload', async id => {
 });
 handle('services:back', () => { const contents = activeContents(); if (contents?.navigationHistory.canGoBack()) contents.navigationHistory.goBack(); });
 handle('services:forward', () => { const contents = activeContents(); if (contents?.navigationHistory.canGoForward()) contents.navigationHistory.goForward(); });
+// Remember a sign-in you type on a service's sign-in page (Settings → General
+// can turn this off). Google asks email and password on separate pages, so a
+// username seen shortly before is paired with the password that follows.
+const pendingUsernames = new Map();
+ipcMain.on('nuvia:signin-capture', (event, data) => {
+  if (readJson(paths.preferences(), {}).rememberSignIns === false || !safeStorage.isEncryptionAvailable()) return;
+  const url = event.senderFrame?.url || event.sender.getURL();
+  if (!isSignInUrl(url)) return;
+  const key = [...views.entries()].find(([, view]) => view.webContents === event.sender)?.[0];
+  const service = key && serviceById(key.split('#')[0]);
+  if (!service) return;
+  const username = String(data?.username || '').trim().slice(0, 320);
+  const password = String(data?.password || '').slice(0, 1024);
+  const pending = pendingUsernames.get(service.id);
+  if (username) pendingUsernames.set(service.id, { username, at: Date.now() });
+  if (!password) return;
+  const user = username || (pending && Date.now() - pending.at < 10 * 60000 ? pending.username : '');
+  if (!user) return;
+  const saved = signInCredentials(service.id);
+  if (saved?.username === user && saved?.password === password) return;
+  writeFileSync(signInFile(service.id), safeStorage.encryptString(JSON.stringify({ username: user, password })), { mode: 0o600 });
+  addNotification({ title: service.name, body: `Sign-in saved for ${user}: Nuvia will reconnect automatically when the session expires. You can remove it in Edit service.`, type: 'success', serviceId: service.id });
+});
+
 handle('services:signin-get', id => { const credentials = signInCredentials(id); return { saved: Boolean(credentials), username: credentials?.username || '', available: safeStorage.isEncryptionAvailable() }; });
 handle('services:signin-set', (id, { username, password } = {}) => {
   if (!safeStorage.isEncryptionAvailable()) throw new Error('The system keychain is unavailable, so the password cannot be stored safely');

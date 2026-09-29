@@ -387,6 +387,26 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       assert.deepEqual(cookies, { value: 'kept', session: true, encrypted: true });
       await ui.eval(`await window.nuvia.signInClear('portal'); return true`);
       assert.equal((await ui.eval(`return window.nuvia.signInGet('portal')`)).saved, false);
+      // Signing in by hand once is enough: Nuvia remembers it and reconnects by itself later.
+      portal = await portalPage();
+      await portal.eval(`localStorage.removeItem('session'); location.reload(); return true`).catch(() => {});
+      portal.close();
+      const sso = await app.page(target => target.type === 'page' && target.url.startsWith('https://sso.nuvia.test'), 30000);
+      await sso.waitFor(`document.querySelector('input[name=username]')`);
+      await sso.eval(`const u = document.querySelector('input[name=username]'); u.value = 'mario.rossi@studenti.example.edu'; document.querySelector('button').click(); return true`);
+      await sso.waitFor(`document.querySelector('input[type=password]')`);
+      await sso.eval(`document.querySelector('input[type=password]').value = 'Segreta-123'; document.querySelector('button').click(); return true`).catch(() => {});
+      sso.close();
+      await ui.waitFor(`window.nuvia.signInGet('portal').then(s => s.saved && s.username === 'mario.rossi@studenti.example.edu')`, { timeout: 15000 });
+      await ui.waitFor(`window.nuvia.listNotifications().then(list => list.some(n => /Sign-in saved for mario/.test(n.body)))`);
+      portal = await portalPage();
+      assert.match(await portal.waitFor(`document.querySelector('h1')?.innerText`, { timeout: 30000 }), /Inbox/);
+      await portal.eval(`localStorage.removeItem('session'); location.reload(); return true`).catch(() => {});
+      portal.close();
+      await sleep(1500);
+      portal = await portalPage();
+      assert.match(await portal.waitFor(`document.querySelector('h1')?.innerText`, { timeout: 30000 }), /Inbox/, 'reconnects with the remembered sign-in');
+      portal.close();
       await click('[data-route="home"]');
     });
 

@@ -1,6 +1,6 @@
 {
   "name": "nuvia-desktop",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": true,
   "description": "Tutti i tuoi servizi web in una finestra, con sessioni persistenti. Windows, macOS e Linux.",
   "author": {
@@ -41,6 +41,7 @@
     "files": [
       "main.js",
       "preload.cjs",
+      "preload-service.cjs",
       "index.html",
       "style.css",
       "lib/**/*",

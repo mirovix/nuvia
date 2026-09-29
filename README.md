@@ -73,7 +73,7 @@ On Ubuntu 22.04 and later the AppImage needs `libfuse2` (`sudo apt install libfu
 - **Messages**: WhatsApp, Telegram and Mattermost in a single timeline that reads like one chat, with quick replies.
 - **Calendar**: one agenda from Google Calendar, Outlook and any iCal link.
 - **Music**: a built-in player on top of Spotify Web, with artwork, artist, album, progress, volume, library and search. It never opens the Spotify app.
-- **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) can sign back in automatically; you get a notification when a second factor is needed.
+- **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) sign back in by themselves after you log in once; you get a notification when a second factor is needed.
 - **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed.
 - **Claude & Codex**: how much of the 5-hour and weekly limits you've used, when they reset, and how many tokens you've spent.
 - **Notifications** panel, **weather**, Italian **trains** (ViaggiaTreno, with delay alerts) and **Notion** shortcuts.
@@ -88,7 +88,7 @@ On Ubuntu 22.04 and later the AppImage needs `libfuse2` (`sudo apt install libfu
 
 ## Privacy
 
-- Nuvia never reads or stores your service passwords unless you turn on **automatic sign-in** for a service (Edit service). Then the email and password you type there are encrypted with the system keychain and filled in only on that service's sign-in pages when its session expires. Each login otherwise stays in a local Chromium profile on your computer.
+- **Stay signed in** (on by default, Settings → General): when you sign in on a service's sign-in page (Google, a university single sign-on, Microsoft), Nuvia keeps that email and password encrypted with the system keychain and uses them only to sign that service back in when its session expires. Nothing is stored on any other page, and you can remove the saved sign-in per service in Edit service. Otherwise each login stays in a local Chromium profile on your computer.
 - Session-only cookies (for example a university single sign-on) are kept across restarts, encrypted with the system keychain, like Chrome does when it reopens your tabs.
 - Mail and chat previews, the agenda and the player state are read from the service pages already open in Nuvia. Nothing goes through a third-party server.
 - **Claude & Codex** reads the local session logs of Claude Code (`~/.claude`) and Codex (`~/.codex`). If you add Claude as a service, it also reads the usage page of your claude.ai account. No credentials are read.

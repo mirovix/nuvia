@@ -1061,9 +1061,13 @@ async function iasOpen(page, credentials = iasCredentials()) {
   state = await page.read();
   return state.ready ? state : { ...state, needsLogin: true, badCredentials: true };
 }
+// A valid session counts as signed in even when the keychain is unavailable
+// and the password could not be stored; the email is remembered separately.
+const iasEmailFile = () => fileInProfile('ias-account.json');
 function iasResult(state, extra = {}) {
   const credentials = iasCredentials();
-  return { configured: Boolean(credentials) && !state.needsLogin, account: credentials?.email || '', fromEnv: Boolean(credentials?.fromEnv), labs: state.labs || [], inside: Boolean(state.inside), currentLab: state.currentLab || '', needsLogin: Boolean(state.needsLogin), ...extra };
+  const email = credentials?.email || readJson(iasEmailFile(), {}).email || '';
+  return { configured: !state.needsLogin && (Boolean(credentials) || Boolean(state.ready)), account: email, fromEnv: Boolean(credentials?.fromEnv), labs: state.labs || [], inside: Boolean(state.inside), currentLab: state.currentLab || '', needsLogin: Boolean(state.needsLogin), ...extra };
 }
 handle('ias:state', () => withIasPage(async page => iasResult(await iasOpen(page))));
 handle('ias:login', async ({ email, password } = {}) => {
@@ -1072,12 +1076,13 @@ handle('ias:login', async ({ email, password } = {}) => {
   return withIasPage(async page => {
     const state = await iasOpen(page, { email, password });
     if (state.needsLogin) return { ok: false, message: 'Sign-in failed: check email and password' };
+    writeJson(iasEmailFile(), { email });
     if (!safeStorage.isEncryptionAvailable()) return { ok: true, ...iasResult(state), message: 'Signed in. The system keychain is unavailable: the password was not saved, only the session is kept.' };
     writeFileSync(IAS.file(), safeStorage.encryptString(JSON.stringify({ email, password })), { mode: 0o600 });
     return { ok: true, ...iasResult(state), message: 'Sign-in saved' };
   });
 });
-handle('ias:logout', async () => { rmSync(IAS.file(), { force: true }); await iasSession().clearStorageData(); return { ok: true }; });
+handle('ias:logout', async () => { rmSync(IAS.file(), { force: true }); rmSync(iasEmailFile(), { force: true }); await iasSession().clearStorageData(); return { ok: true }; });
 handle('ias:enter', laboratory => withIasPage(async page => {
   const state = await iasOpen(page);
   if (state.needsLogin) return iasResult(state, { ok: false, message: 'Sign in to DEI Labs first' });

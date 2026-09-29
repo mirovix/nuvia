@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Nuvia: a horse head in profile, mane in three strands. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#202126"/><stop offset="1" stop-color="#0d0e10"/></linearGradient>
+    <linearGradient id="coat" x1="0.15" y1="0.05" x2="0.85" y2="1"><stop offset="0" stop-color="#ff9466"/><stop offset=".55" stop-color="#ff6a3d"/><stop offset="1" stop-color="#e8481c"/></linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1"><stop offset=".62" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <mask id="neck"><rect width="512" height="512" fill="url(#fade)"/></mask>
+    <clipPath id="tile"><rect x="16" y="16" width="480" height="480" rx="112"/></clipPath>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <g clip-path="url(#tile)">
+    <circle cx="300" cy="230" r="190" fill="#ff6a3d" opacity=".07"/>
+    <g mask="url(#neck)">
+      <!-- head and neck -->
+      <path fill="url(#coat)" d="M196 500 C188 420 190 330 214 262 C230 216 250 180 268 150 L276 92 Q279 84 285 90 L307 132 C344 150 372 190 392 238 C404 266 418 296 428 322 C438 348 432 374 410 384 C392 392 372 388 356 378 C338 367 318 356 300 354 C284 352 276 364 280 384 C286 414 300 452 316 500 Z"/>
+      <!-- mane strands -->
+      <path fill="#ffb389" d="M266 150 C236 170 208 206 194 250 C182 288 180 330 176 372 C198 318 214 262 262 176 Z"/>
+      <path fill="#ffc9ab" d="M252 168 C222 196 196 238 186 286 C176 332 170 380 158 430 C150 370 150 312 166 262 C182 214 214 182 252 168 Z" opacity=".9"/>
+      <path fill="#ff8a5a" d="M236 196 C204 226 180 270 172 320 C164 372 156 420 140 470 C134 408 138 350 152 300 C166 252 196 216 236 196 Z" opacity=".85"/>
+    </g>
+    <!-- eye, nostril, cheek -->
+    <path fill="#16171a" d="M318 206 Q332 196 344 206 Q332 214 318 206 Z"/>
+    <path fill="none" stroke="#16171a" stroke-opacity=".22" stroke-width="5" stroke-linecap="round" d="M318 236 C296 262 294 306 318 332"/>
+    <ellipse cx="410" cy="352" rx="7" ry="5" fill="#16171a" opacity=".55" transform="rotate(-20 410 352)"/>
+  </g>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="111.5" fill="none" stroke="#fff" stroke-opacity=".08"/>
+</svg>

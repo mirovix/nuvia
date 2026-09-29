@@ -1,4 +1,6 @@
-# Nuvia
+<p align="center"><img src="assets/icon.png" width="112" alt="Nuvia"></p>
+
+<h1 align="center">Nuvia</h1>
 
 Tutti i tuoi servizi web in una finestra: Gmail, Outlook, WhatsApp, Telegram, Mattermost, Spotify, Notion, Claude, Codex e qualsiasi altro sito. Ogni servizio ha un profilo separato e persistente, così fai il login una volta sola. Una panoramica configurabile riunisce posta, agenda, chat, musica e altro.
 

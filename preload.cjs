@@ -1,0 +1,82 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const invoke = channel => (...args) => ipcRenderer.invoke(channel, ...args);
+const listen = channel => callback => {
+  const handler = (_, value) => callback(value);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+};
+
+contextBridge.exposeInMainWorld('nuvia', {
+  platform: process.platform,
+  chooseFolder: invoke('dialog:folder'),
+  appInfo: invoke('app:info'),
+  minimize: invoke('window:minimize'),
+  maximize: invoke('window:maximize'),
+  close: invoke('window:close'),
+  windowState: invoke('window:state'),
+  onWindowState: listen('window:state'),
+  setViewBounds: invoke('view:bounds'),
+  setOverlay: invoke('overlay:set'),
+
+  listServices: invoke('services:list'),
+  saveServices: invoke('services:save'),
+  serviceState: invoke('services:state'),
+  onServiceState: listen('services:state'),
+  activate: invoke('services:activate'),
+  activateUrl: invoke('services:activate-url'),
+  home: invoke('services:home'),
+  reload: invoke('services:reload'),
+  back: invoke('services:back'),
+  forward: invoke('services:forward'),
+  removeView: invoke('services:remove-view'),
+  serviceMenu: invoke('services:context-menu'),
+  onOpenService: listen('open-service'),
+  onEditService: listen('service:edit'),
+  onRemoveService: listen('service:remove'),
+  onShortcut: listen('shortcut'),
+
+  getPreferences: invoke('preferences:get'),
+  savePreferences: invoke('preferences:save'),
+  chooseBackground: invoke('preferences:background-file'),
+
+  listExtensions: invoke('extensions:list'),
+  searchExtensions: invoke('extensions:search'),
+  installExtension: invoke('extensions:install'),
+  toggleExtension: invoke('extensions:toggle'),
+  removeExtension: invoke('extensions:remove'),
+  extensionPopup: invoke('extensions:popup'),
+
+  mail: invoke('mail:list'),
+  openMail: invoke('mail:open'),
+  messages: invoke('messages:list'),
+  openMessage: invoke('messages:open'),
+  sendMessage: invoke('messages:send'),
+  calendarEvents: invoke('calendar:events'),
+
+  musicState: invoke('music:state'),
+  musicControl: invoke('music:control'),
+  musicLibrary: invoke('music:library'),
+  musicSearch: invoke('music:search'),
+  musicPlayTrack: invoke('music:play-track'),
+  musicPlayUri: invoke('music:play-uri'),
+  openSpotify: invoke('music:open'),
+
+  suggestPlaces: invoke('places:suggest'),
+  route: invoke('commute:route'),
+  trainStatus: invoke('trains:status'),
+  ritardometroConfig: invoke('ritardometro:config'),
+  iasStatus: invoke('ias:status'),
+  iasLabs: invoke('ias:labs'),
+  iasLogin: invoke('ias:login'),
+
+  listNotifications: invoke('notifications:list'),
+  addNotification: invoke('notifications:add'),
+  removeNotification: invoke('notifications:remove'),
+  readAllNotifications: invoke('notifications:read-all'),
+  onNotificationsChanged: listen('notifications:changed'),
+
+  aiUsage: invoke('ai:usage'),
+  debugState: invoke('debug:state'),
+  debugGuard: invoke('debug:crash-guard')
+});

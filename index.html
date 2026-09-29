@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="it" data-theme="dark" data-accent="coral">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob: https:; font-src 'self'; connect-src 'self' https:; media-src 'self' https:">
+  <title>Nuvia</title>
+  <link rel="stylesheet" href="node_modules/leaflet/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-bg="plain">
+  <div class="backdrop" aria-hidden="true"></div>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="brand drag">
+      <img src="assets/icon.png" alt="">
+      <strong>Nuvia</strong>
+      <button class="icon-btn no-drag" id="collapse-sidebar" title="Riduci barra laterale" data-icon="panel-left"></button>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="nav-item" data-route="home" data-icon="house"><span>Panoramica</span></button>
+      <button class="nav-item" data-route="messages" data-icon="message-circle"><span>Messaggi</span><b class="count" hidden></b></button>
+      <button class="nav-item" data-route="calendar" data-icon="calendar"><span>Calendario</span></button>
+      <button class="nav-item" data-route="music" data-icon="music"><span>Musica</span><i class="eq" hidden><i></i><i></i><i></i></i></button>
+      <button class="nav-item" data-route="ai" data-icon="gauge"><span>Claude &amp; Codex</span></button>
+    </nav>
+    <div class="section-label"><span>Servizi</span><button class="icon-btn small" id="sidebar-add" title="Aggiungi servizio" data-icon="plus"></button></div>
+    <div class="service-list" id="service-list"></div>
+    <div class="sidebar-foot">
+      <button class="nav-item" id="open-extensions" data-icon="puzzle"><span>Estensioni</span></button>
+      <button class="nav-item" id="open-settings" data-icon="settings"><span>Impostazioni</span></button>
+    </div>
+  </aside>
+
+  <header class="topbar drag" id="topbar">
+    <div class="crumbs no-drag" id="crumbs">
+      <div class="service-nav" id="service-nav" hidden>
+        <button class="icon-btn" id="nav-back" title="Indietro" data-icon="arrow-left"></button>
+        <button class="icon-btn" id="nav-forward" title="Avanti" data-icon="arrow-right"></button>
+        <button class="icon-btn" id="nav-reload" title="Ricarica (Ctrl+R)" data-icon="rotate-cw"></button>
+      </div>
+      <h1 id="page-title">Panoramica</h1>
+      <span class="page-sub" id="page-sub"></span>
+    </div>
+    <div class="top-actions no-drag">
+      <div class="extension-toolbar" id="extension-toolbar"></div>
+      <button class="icon-btn" id="open-palette" title="Vai a… (Ctrl+K)" data-icon="search"></button>
+      <button class="icon-btn has-badge" id="open-notifications" title="Notifiche" data-icon="bell"><b class="dot-badge" hidden></b></button>
+      <button class="icon-btn" id="customize" title="Personalizza panoramica" data-icon="layout-grid"></button>
+      <button class="btn accent" id="add-service" data-icon="plus"><span>Servizio</span></button>
+      <div class="window-controls">
+        <button id="window-min" title="Riduci a icona" data-icon="minus"></button>
+        <button id="window-max" title="Ingrandisci" data-icon="square"></button>
+        <button id="window-close" title="Chiudi" data-icon="x"></button>
+      </div>
+    </div>
+    <div class="load-bar" id="load-bar" hidden></div>
+  </header>
+
+  <main class="stage" id="stage">
+    <section class="page" id="page-home" data-page="home">
+      <div class="hero" id="hero"></div>
+      <div class="grid" id="widget-grid"></div>
+    </section>
+    <section class="page" id="page-messages" data-page="messages" hidden></section>
+    <section class="page" id="page-calendar" data-page="calendar" hidden></section>
+    <section class="page" id="page-music" data-page="music" hidden></section>
+    <section class="page" id="page-ai" data-page="ai" hidden></section>
+    <div class="view-host" id="view-host" hidden>
+      <div class="view-shot" id="view-shot"></div>
+      <div class="view-state" id="view-state"></div>
+    </div>
+  </main>
+
+  <div class="toast-stack" id="toasts" aria-live="polite"></div>
+
+  <script src="node_modules/leaflet/dist/leaflet.js"></script>
+  <script type="module" src="ui/app.js"></script>
+</body>
+</html>

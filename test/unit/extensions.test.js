@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { readInfo, patternMatches, defaultRules, matchPatterns } from '../../lib/extensions.js';
+import { serviceKind, serviceGroup } from '../../lib/kinds.js';
+
+const services = [{ id: 'gmail', url: 'https://mail.google.com/mail/u/2/#inbox' }, { id: 'wa', url: 'https://web.whatsapp.com/' }, { id: 'notion', url: 'https://www.notion.so/' }];
+
+test('patternMatches segue le regole di Chrome', () => {
+  assert.ok(patternMatches('https://mail.google.com/*', 'https://mail.google.com/mail/u/0/'));
+  assert.ok(patternMatches('*://*.google.com/*', 'https://mail.google.com/x'));
+  assert.ok(patternMatches('*://mail.google.com/', 'https://mail.google.com/mail/u/2/#inbox'));
+  assert.ok(patternMatches('<all_urls>', 'https://web.whatsapp.com/'));
+  assert.ok(!patternMatches('https://mail.google.com/*', 'https://web.whatsapp.com/'));
+  assert.ok(!patternMatches('*://*.google.com/*', 'https://notgoogle.com/'));
+});
+
+test('Streak si attiva solo su Gmail, Dark Reader ovunque', () => {
+  const streak = { matches: matchPatterns({ content_scripts: [{ matches: ['https://mail.google.com/*'] }, { matches: ['*://*.google.com/*'] }], host_permissions: ['*://mail.google.com/', '*://*.streak.com/'] }) };
+  assert.deepEqual(defaultRules(streak, services), { gmail: true, wa: false, notion: false });
+  const darkReader = { matches: ['<all_urls>'] };
+  assert.deepEqual(defaultRules(darkReader, services), { gmail: true, wa: true, notion: true });
+});
+
+test('readInfo risolve i nomi localizzati e le icone', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ext-'));
+  mkdirSync(join(dir, '_locales', 'en'), { recursive: true });
+  writeFileSync(join(dir, '_locales', 'en', 'messages.json'), JSON.stringify({ appName: { message: 'Streak CRM for Gmail' } }));
+  writeFileSync(join(dir, 'icon128.png'), '');
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ manifest_version: 3, name: '__MSG_appName__', default_locale: 'en', version: '7.1', icons: { 16: 'missing.png', 128: 'icon128.png' }, action: { default_popup: 'popup.html' }, content_scripts: [{ matches: ['https://mail.google.com/*'] }] }));
+  const info = readInfo(dir);
+  assert.equal(info.name, 'Streak CRM for Gmail');
+  assert.equal(info.popup, 'popup.html');
+  assert.match(info.icon, /icon128\.png$/);
+  assert.equal(readInfo(join(dir, 'nope')), null);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('serviceKind e serviceGroup', () => {
+  assert.equal(serviceKind({ url: 'https://mail.google.com/mail/u/2/' }), 'gmail');
+  assert.equal(serviceKind({ url: 'https://outlook.office.com/mail/?login_hint=x' }), 'outlook');
+  assert.equal(serviceKind({ url: 'https://mattermost.dei.unipd.it/iaslab' }), 'mattermost');
+  assert.equal(serviceKind({ url: 'https://chatgpt.com/codex' }), 'codex');
+  assert.equal(serviceKind({ url: 'https://claude.ai/new' }), 'claude');
+  assert.equal(serviceGroup({ url: 'https://web.telegram.org/k/' }), 'message');
+  assert.equal(serviceGroup({ url: 'https://outlook.live.com/mail/0/' }), 'mail');
+  assert.equal(serviceGroup({ url: 'https://example.com' }), 'web');
+});

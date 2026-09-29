@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><title>(3) WhatsApp</title></head>
+<body>
+<!-- Minimal copy of the WhatsApp Web chat list read by lib/scripts.js#chatList -->
+<div id="pane-side">
+  <div role="listitem"><div role="gridcell">Mamma</div><div>14:02</div><div>Ricordati il pane</div><span aria-label="2 messaggi non letti">2</span></div>
+  <div role="listitem"><div role="gridcell">Gruppo Lab</div><div>ieri</div><div>Marco: domani riunione alle 10</div></div>
+  <div role="listitem"><div role="gridcell">Giulia</div><div>09:30</div><div>Perfetto, a dopo!</div><span aria-label="1 messaggio non letto">1</span></div>
+</div>
+<div id="main" hidden><header></header><div id="log"></div><footer><div contenteditable="true" role="textbox"></div><button aria-label="Invia">invia</button></footer></div>
+<script>
+  window.sent = [];
+  document.querySelectorAll('#pane-side [role="listitem"]').forEach(row => row.querySelector('[role="gridcell"]').addEventListener('click', () => {
+    const main = document.querySelector('#main'); main.hidden = false;
+    main.querySelector('header').textContent = row.innerText.split('\n')[0];
+  }));
+  document.querySelector('footer button').addEventListener('click', () => {
+    const box = document.querySelector('footer [contenteditable]');
+    window.sent.push({ chat: document.querySelector('#main header').textContent, text: box.innerText });
+    document.title = 'sent:' + box.innerText; box.textContent = '';
+  });
+</script>
+</body></html>

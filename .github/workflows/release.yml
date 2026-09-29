@@ -1,0 +1,67 @@
+name: Release
+
+# Push a tag like v0.6.0 to build every platform and publish a GitHub Release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: --linux
+          - os: windows-latest
+            target: --win
+          - os: macos-latest
+            target: --mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+      - run: npm ci
+      - run: npm test
+      - name: Build packages
+        run: npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          # No Apple/Windows code-signing certificates: build unsigned.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuvia-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.tar.gz
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - run: ls -la packages && (cd packages && sha256sum * > SHA256SUMS.txt)
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Nuvia ${{ github.ref_name }}
+          generate_release_notes: true
+          files: packages/*

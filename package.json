@@ -1,0 +1,134 @@
+{
+  "name": "nuvia-desktop",
+  "version": "0.6.0",
+  "private": true,
+  "description": "Tutti i tuoi servizi web in una finestra, con sessioni persistenti. Windows, macOS e Linux.",
+  "author": {
+    "name": "Miroljub Mihailovic",
+    "email": "miroljubmihailovic98@gmail.com"
+  },
+  "homepage": "https://github.com/mirovix/nuvia",
+  "desktopName": "Nuvia",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/start.mjs",
+    "test": "node --test test/unit/*.test.js",
+    "test:ui": "node --test --test-concurrency=1 test/ui.test.js",
+    "test:integration": "node --test --test-concurrency=1 test/integration.test.js",
+    "test:all": "npm test && npm run test:ui && npm run test:integration",
+    "icons": "node scripts/build-icons.mjs",
+    "pack": "electron-builder --publish never",
+    "pack:linux": "electron-builder --linux --publish never",
+    "pack:win": "electron-builder --win --publish never",
+    "pack:mac": "electron-builder --mac --publish never"
+  },
+  "devDependencies": {
+    "@fontsource-variable/instrument-sans": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
+    "electron": "github:castlabs/electron-releases#v37.10.3+wvcus",
+    "electron-builder": "^26.0.12",
+    "lucide-static": "^1.48.0"
+  },
+  "build": {
+    "appId": "it.nuvia.desktop",
+    "productName": "Nuvia",
+    "artifactName": "Nuvia-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "asarUnpack": [
+      "scripts/**/*"
+    ],
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "index.html",
+      "style.css",
+      "lib/**/*",
+      "ui/**/*",
+      "node_modules/leaflet/dist/**/*",
+      "assets/**/*",
+      "scripts/ias_bridge.py",
+      "!scripts/after-pack.cjs"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm",
+        "tar.gz"
+      ],
+      "category": "Network",
+      "icon": "assets/icon.png",
+      "maintainer": "Miroljub Mihailovic <miroljubmihailovic98@gmail.com>",
+      "synopsis": "I tuoi servizi web in una finestra",
+      "syncDesktopName": true
+    },
+    "electronDownload": {
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "Nuvia-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Nuvia-${version}-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.png",
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "artifactName": "Nuvia-${version}-mac-${arch}.${ext}"
+    },
+    "afterPack": "scripts/after-pack.cjs"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4",
+    "yauzl": "^3.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mirovix/nuvia.git"
+  }
+}

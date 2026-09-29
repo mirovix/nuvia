@@ -14,7 +14,7 @@ export function icon(name, extra = '') {
   return svg;
 }
 
-// h('button.btn.accent', { on: { click } }, icon('plus'), 'Aggiungi')
+// h('button.btn.accent', { on: { click } }, icon('plus'), 'Add')
 export function h(spec, props = {}, ...children) {
   if (props instanceof Node || typeof props === 'string' || Array.isArray(props)) { children.unshift(props); props = {}; }
   const name = spec.match(/^[a-z][a-z0-9-]*/i)?.[0] || 'div';
@@ -79,33 +79,33 @@ export function startOfDay(at) { const date = new Date(at); date.setHours(0, 0, 
 export function dayLabel(at, { long = false } = {}) {
   const today = startOfDay(Date.now());
   const diff = Math.round((startOfDay(at) - today) / 86400000);
-  if (diff === 0) return 'Oggi';
-  if (diff === 1) return 'Domani';
-  if (diff === -1) return 'Ieri';
-  return new Date(at).toLocaleDateString('it-IT', long ? { weekday: 'long', day: 'numeric', month: 'long' } : { weekday: 'short', day: 'numeric', month: 'short' });
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  return new Date(at).toLocaleDateString('en-GB', long ? { weekday: 'long', day: 'numeric', month: 'long' } : { weekday: 'short', day: 'numeric', month: 'short' });
 }
 export function relativeTime(at) {
   if (!at) return '';
   const minutes = Math.round((Date.now() - at) / 60000);
-  if (minutes < 1) return 'adesso';
-  if (minutes < 60) return `${minutes} min fa`;
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
   if (sameDay(at, Date.now())) return clock(at);
-  if (minutes < 2880 && sameDay(at, Date.now() - 86400000)) return 'ieri';
-  return new Date(at).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+  if (minutes < 2880 && sameDay(at, Date.now() - 86400000)) return 'yesterday';
+  return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 export function countdown(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) return 'adesso';
+  if (!Number.isFinite(ms) || ms <= 0) return 'now';
   const minutes = Math.round(ms / 60000);
   const days = Math.floor(minutes / 1440); const hours = Math.floor((minutes % 1440) / 60); const rest = minutes % 60;
-  if (days) return `${days} g ${hours} h`;
+  if (days) return `${days} d ${hours} h`;
   if (hours) return `${hours} h ${pad(rest)} min`;
   return `${rest} min`;
 }
 export function tokens(value) {
   const n = Number(value || 0);
-  if (n >= 1e9) return `${(n / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 2 })} mld`;
-  if (n >= 1e6) return `${(n / 1e6).toLocaleString('it-IT', { maximumFractionDigits: 1 })} mln`;
-  if (n >= 1e3) return `${Math.round(n / 1e3).toLocaleString('it-IT')} k`;
+  if (n >= 1e9) return `${(n / 1e9).toLocaleString('en-GB', { maximumFractionDigits: 2 })}B`;
+  if (n >= 1e6) return `${(n / 1e6).toLocaleString('en-GB', { maximumFractionDigits: 1 })}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3).toLocaleString('en-GB')}k`;
   return String(n);
 }
 export function hue(text = '') { let value = 0; for (const char of text) value = (value * 31 + char.charCodeAt(0)) % 360; return value; }
@@ -137,7 +137,7 @@ export async function openModal(dialog) {
 
 export function sheet({ title, subtitle = '', body = [], foot = [], wide = false, transient = true, cls = '' }) {
   const dialog = h(`dialog.sheet${wide ? '.wide' : ''}${cls ? `.${cls}` : ''}`, { dataset: transient ? { transient: '1' } : {} });
-  const closeButton = h('button.icon-btn', { type: 'button', title: 'Chiudi', on: { click: () => dialog.close() } }, icon('x'));
+  const closeButton = h('button.icon-btn', { type: 'button', title: 'Close', on: { click: () => dialog.close() } }, icon('x'));
   dialog.append(h('div.sheet-inner',
     h('div.sheet-head', h('div', h('h2', title), subtitle ? h('p', subtitle) : null), closeButton),
     h('div.sheet-body', body),
@@ -161,12 +161,12 @@ export async function popover(anchor, content, { cls = '', width = 300 } = {}) {
   return dialog;
 }
 
-export function confirmDialog(title, message, { confirm = 'Conferma', danger = false } = {}) {
+export function confirmDialog(title, message, { confirm = 'Confirm', danger = false } = {}) {
   return new Promise(resolveChoice => {
     let choice = false;
     const dialog = sheet({
       title, subtitle: message,
-      foot: [h('button.btn.ghost', { type: 'button', on: { click: () => dialog.close() } }, 'Annulla'),
+      foot: [h('button.btn.ghost', { type: 'button', on: { click: () => dialog.close() } }, 'Cancel'),
         h(`button.btn${danger ? '.danger' : '.accent'}`, { type: 'button', on: { click: () => { choice = true; dialog.close(); } } }, confirm)]
     });
     dialog.addEventListener('close', () => resolveChoice(choice), { once: true });

@@ -8,7 +8,7 @@ import { serviceKind, serviceGroup } from '../../lib/kinds.js';
 
 const services = [{ id: 'gmail', url: 'https://mail.google.com/mail/u/2/#inbox' }, { id: 'wa', url: 'https://web.whatsapp.com/' }, { id: 'notion', url: 'https://www.notion.so/' }];
 
-test('patternMatches segue le regole di Chrome', () => {
+test("patternMatches follows Chrome's rules", () => {
   assert.ok(patternMatches('https://mail.google.com/*', 'https://mail.google.com/mail/u/0/'));
   assert.ok(patternMatches('*://*.google.com/*', 'https://mail.google.com/x'));
   assert.ok(patternMatches('*://mail.google.com/', 'https://mail.google.com/mail/u/2/#inbox'));
@@ -17,14 +17,14 @@ test('patternMatches segue le regole di Chrome', () => {
   assert.ok(!patternMatches('*://*.google.com/*', 'https://notgoogle.com/'));
 });
 
-test('Streak si attiva solo su Gmail, Dark Reader ovunque', () => {
+test('Streak is enabled only on Gmail, Dark Reader everywhere', () => {
   const streak = { matches: matchPatterns({ content_scripts: [{ matches: ['https://mail.google.com/*'] }, { matches: ['*://*.google.com/*'] }], host_permissions: ['*://mail.google.com/', '*://*.streak.com/'] }) };
   assert.deepEqual(defaultRules(streak, services), { gmail: true, wa: false, notion: false });
   const darkReader = { matches: ['<all_urls>'] };
   assert.deepEqual(defaultRules(darkReader, services), { gmail: true, wa: true, notion: true });
 });
 
-test('readInfo risolve i nomi localizzati e le icone', () => {
+test('readInfo resolves localized names and icons', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ext-'));
   mkdirSync(join(dir, '_locales', 'en'), { recursive: true });
   writeFileSync(join(dir, '_locales', 'en', 'messages.json'), JSON.stringify({ appName: { message: 'Streak CRM for Gmail' } }));
@@ -38,7 +38,7 @@ test('readInfo risolve i nomi localizzati e le icone', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('serviceKind e serviceGroup', () => {
+test('serviceKind and serviceGroup', () => {
   assert.equal(serviceKind({ url: 'https://mail.google.com/mail/u/2/' }), 'gmail');
   assert.equal(serviceKind({ url: 'https://outlook.office.com/mail/?login_hint=x' }), 'outlook');
   assert.equal(serviceKind({ url: 'https://mattermost.dei.unipd.it/iaslab' }), 'mattermost');

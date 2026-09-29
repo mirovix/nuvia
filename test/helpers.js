@@ -37,7 +37,7 @@ export class Page {
   }
   async eval(expression, { timeout = 60000 } = {}) {
     const response = await Promise.race([this.send('Runtime.evaluate', { expression: `(async () => { ${expression} })()`, awaitPromise: true, returnByValue: true, userGesture: true }), sleep(timeout).then(() => ({ timeout: true }))]);
-    if (response.timeout) throw new Error(`Timeout valutando: ${expression.slice(0, 120)}`);
+    if (response.timeout) throw new Error(`Timeout evaluating: ${expression.slice(0, 120)}`);
     if (response.result?.exceptionDetails) throw new Error(response.result.exceptionDetails.exception?.description || response.result.exceptionDetails.text);
     return response.result?.result?.value;
   }
@@ -47,7 +47,7 @@ export class Page {
       try { last = await this.eval(`return (${expression});`, { timeout: 5000 }); if (last) return last; } catch (error) { last = error.message; }
       await sleep(interval);
     }
-    throw new Error(`Condizione non soddisfatta: ${expression} (ultimo valore: ${JSON.stringify(last)})`);
+    throw new Error(`Condition not met: ${expression} (last value: ${JSON.stringify(last)})`);
   }
   async screenshot(file) {
     const { result } = await this.send('Page.captureScreenshot', { format: 'png' });
@@ -81,7 +81,7 @@ export async function launch({ prepare, env: extraEnv = {}, width = 1480, height
         try { const target = (await app.targets()).find(predicate); if (target) return new Page(target).connect(); } catch {}
         await sleep(200);
       }
-      throw new Error('Pagina non trovata');
+      throw new Error('Page not found');
     },
     async ui() {
       const page = await app.page(target => target.type === 'page' && /index\.html$/.test(target.url));

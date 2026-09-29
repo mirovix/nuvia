@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it" data-theme="dark" data-accent="coral">
+<html lang="en" data-theme="dark" data-accent="blue">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -15,43 +15,43 @@
     <div class="brand drag">
       <img src="assets/icon.png" alt="">
       <strong>Nuvia</strong>
-      <button class="icon-btn no-drag" id="collapse-sidebar" title="Riduci barra laterale" data-icon="panel-left"></button>
+      <button class="icon-btn no-drag" id="collapse-sidebar" title="Collapse sidebar" data-icon="panel-left"></button>
     </div>
     <nav class="nav" id="nav">
-      <button class="nav-item" data-route="home" data-icon="house"><span>Panoramica</span></button>
-      <button class="nav-item" data-route="messages" data-icon="message-circle"><span>Messaggi</span><b class="count" hidden></b></button>
-      <button class="nav-item" data-route="calendar" data-icon="calendar"><span>Calendario</span></button>
-      <button class="nav-item" data-route="music" data-icon="music"><span>Musica</span><i class="eq" hidden><i></i><i></i><i></i></i></button>
+      <button class="nav-item" data-route="home" data-icon="house"><span>Overview</span></button>
+      <button class="nav-item" data-route="messages" data-icon="message-circle"><span>Messages</span><b class="count" hidden></b></button>
+      <button class="nav-item" data-route="calendar" data-icon="calendar"><span>Calendar</span></button>
+      <button class="nav-item" data-route="music" data-icon="music"><span>Music</span><i class="eq" hidden><i></i><i></i><i></i></i></button>
       <button class="nav-item" data-route="ai" data-icon="gauge"><span>Claude &amp; Codex</span></button>
     </nav>
-    <div class="section-label"><span>Servizi</span><button class="icon-btn small" id="sidebar-add" title="Aggiungi servizio" data-icon="plus"></button></div>
+    <div class="section-label"><span>Services</span><button class="icon-btn small" id="sidebar-add" title="Add service" data-icon="plus"></button></div>
     <div class="service-list" id="service-list"></div>
     <div class="sidebar-foot">
-      <button class="nav-item" id="open-extensions" data-icon="puzzle"><span>Estensioni</span></button>
-      <button class="nav-item" id="open-settings" data-icon="settings"><span>Impostazioni</span></button>
+      <button class="nav-item" id="open-extensions" data-icon="puzzle"><span>Extensions</span></button>
+      <button class="nav-item" id="open-settings" data-icon="settings"><span>Settings</span></button>
     </div>
   </aside>
 
   <header class="topbar drag" id="topbar">
     <div class="crumbs no-drag" id="crumbs">
       <div class="service-nav" id="service-nav" hidden>
-        <button class="icon-btn" id="nav-back" title="Indietro" data-icon="arrow-left"></button>
-        <button class="icon-btn" id="nav-forward" title="Avanti" data-icon="arrow-right"></button>
-        <button class="icon-btn" id="nav-reload" title="Ricarica (Ctrl+R)" data-icon="rotate-cw"></button>
+        <button class="icon-btn" id="nav-back" title="Back" data-icon="arrow-left"></button>
+        <button class="icon-btn" id="nav-forward" title="Forward" data-icon="arrow-right"></button>
+        <button class="icon-btn" id="nav-reload" title="Reload (Ctrl+R)" data-icon="rotate-cw"></button>
       </div>
-      <h1 id="page-title">Panoramica</h1>
+      <h1 id="page-title">Overview</h1>
       <span class="page-sub" id="page-sub"></span>
     </div>
     <div class="top-actions no-drag">
       <div class="extension-toolbar" id="extension-toolbar"></div>
-      <button class="icon-btn" id="open-palette" title="Vai a… (Ctrl+K)" data-icon="search"></button>
-      <button class="icon-btn has-badge" id="open-notifications" title="Notifiche" data-icon="bell"><b class="dot-badge" hidden></b></button>
-      <button class="icon-btn" id="customize" title="Personalizza panoramica" data-icon="layout-grid"></button>
-      <button class="btn accent" id="add-service" data-icon="plus"><span>Servizio</span></button>
+      <button class="icon-btn" id="open-palette" title="Go to… (Ctrl+K)" data-icon="search"></button>
+      <button class="icon-btn has-badge" id="open-notifications" title="Notifications" data-icon="bell"><b class="dot-badge" hidden></b></button>
+      <button class="icon-btn" id="customize" title="Customize overview" data-icon="layout-grid"></button>
+      <button class="btn accent" id="add-service" data-icon="plus"><span>Service</span></button>
       <div class="window-controls">
-        <button id="window-min" title="Riduci a icona" data-icon="minus"></button>
-        <button id="window-max" title="Ingrandisci" data-icon="square"></button>
-        <button id="window-close" title="Chiudi" data-icon="x"></button>
+        <button id="window-min" title="Minimize" data-icon="minus"></button>
+        <button id="window-max" title="Maximize" data-icon="square"></button>
+        <button id="window-close" title="Close" data-icon="x"></button>
       </div>
     </div>
     <div class="load-bar" id="load-bar" hidden></div>

@@ -2,19 +2,19 @@
 <body>
 <!-- Minimal copy of the Spotify web player controls read by lib/scripts.js -->
 <nav id="Desktop_LeftSidebar_Id">
-  <div role="row" aria-labelledby="listrow-title-spotify:playlist:37i9dQZF1DX0 listrow-subtitle-spotify:playlist:37i9dQZF1DX0"><img src=""><span data-encore-id="listRowTitle">Focus Mattina</span><span data-encore-id="listRowSubtitle">Playlist · Nuvia</span></div>
-  <div role="row" aria-labelledby="listrow-title-spotify:collection:tracks"><span data-encore-id="listRowTitle">Brani che ti piacciono</span><span data-encore-id="listRowSubtitle">Playlist · 120 brani</span></div>
+  <div role="row" aria-labelledby="listrow-title-spotify:playlist:37i9dQZF1DX0 listrow-subtitle-spotify:playlist:37i9dQZF1DX0"><img src=""><span data-encore-id="listRowTitle">Morning Focus</span><span data-encore-id="listRowSubtitle">Playlist · Nuvia</span></div>
+  <div role="row" aria-labelledby="listrow-title-spotify:collection:tracks"><span data-encore-id="listRowTitle">Liked Songs</span><span data-encore-id="listRowSubtitle">Playlist · 120 songs</span></div>
 </nav>
 <main>
-  <div data-testid="action-bar-row"><button data-testid="play-button" aria-label="Riproduci">play</button></div>
-  <div data-testid="tracklist-row"><button aria-label="Riproduci Nuvole">p</button><a data-testid="internal-track-link" href="/track/1"><div>Nuvole</div></a><a href="/artist/1">Artista Uno</a><div>3:41</div></div>
-  <div data-testid="tracklist-row"><button aria-label="Riproduci Sereno">p</button><a data-testid="internal-track-link" href="/track/2"><div>Sereno</div></a><a href="/artist/2">Artista Due</a><div>2:58</div></div>
+  <div data-testid="action-bar-row"><button data-testid="play-button" aria-label="Play">play</button></div>
+  <div data-testid="tracklist-row"><button aria-label="Play Clouds">p</button><a data-testid="internal-track-link" href="/track/1"><div>Clouds</div></a><a href="/artist/1">Artist One</a><div>3:41</div></div>
+  <div data-testid="tracklist-row"><button aria-label="Play Clear Skies">p</button><a data-testid="internal-track-link" href="/track/2"><div>Clear Skies</div></a><a href="/artist/2">Artist Two</a><div>2:58</div></div>
 </main>
 <footer>
-  <div data-testid="now-playing-widget"><div data-testid="context-item-info-title">Nuvole</div><div data-testid="context-item-info-subtitles">Artista Uno</div><button data-testid="add-button" aria-checked="false">like</button></div>
+  <div data-testid="now-playing-widget"><div data-testid="context-item-info-title">Clouds</div><div data-testid="context-item-info-subtitles">Artist One</div><button data-testid="add-button" aria-checked="false">like</button></div>
   <button data-testid="control-button-shuffle" aria-checked="false">s</button>
   <button data-testid="control-button-skip-back">prev</button>
-  <button data-testid="control-button-playpause" aria-label="Riproduci">pp</button>
+  <button data-testid="control-button-playpause" aria-label="Play">pp</button>
   <button data-testid="control-button-skip-forward">next</button>
   <button data-testid="control-button-repeat" aria-checked="false">r</button>
   <div data-testid="playback-position">1:05</div>
@@ -23,7 +23,7 @@
   <div data-testid="volume-bar"><input type="range" min="0" max="1" step="0.01" value="0.5"></div>
 </footer>
 <script>
-  const tracks = [['Nuvole', 'Artista Uno'], ['Sereno', 'Artista Due'], ['Vento', 'Artista Tre']];
+  const tracks = [['Clouds', 'Artist One'], ['Clear Skies', 'Artist Two'], ['Wind', 'Artist Three']];
   let index = 0; window.log = [];
   const q = s => document.querySelector(s);
   const show = () => {
@@ -32,14 +32,14 @@
     navigator.mediaSession.metadata = new MediaMetadata({ title: tracks[index][0], artist: tracks[index][1], album: 'Album Test', artwork: [{ src: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', sizes: '64x64' }] });
   };
   const toggle = (sel, a = 'aria-checked') => q(sel).setAttribute(a, q(sel).getAttribute(a) === 'true' ? 'false' : 'true');
-  q('[data-testid="control-button-playpause"]').onclick = () => { const b = q('[data-testid="control-button-playpause"]'); b.setAttribute('aria-label', b.getAttribute('aria-label') === 'Pausa' ? 'Riproduci' : 'Pausa'); log.push('play'); };
+  q('[data-testid="control-button-playpause"]').onclick = () => { const b = q('[data-testid="control-button-playpause"]'); b.setAttribute('aria-label', b.getAttribute('aria-label') === 'Pause' ? 'Play' : 'Pause'); log.push('play'); };
   q('[data-testid="control-button-skip-forward"]').onclick = () => { index = (index + 1) % tracks.length; show(); log.push('next'); };
   q('[data-testid="control-button-skip-back"]').onclick = () => { index = (index + tracks.length - 1) % tracks.length; show(); log.push('previous'); };
   q('[data-testid="control-button-shuffle"]').onclick = () => { toggle('[data-testid="control-button-shuffle"]'); log.push('shuffle'); };
   q('[data-testid="control-button-repeat"]').onclick = () => { toggle('[data-testid="control-button-repeat"]'); log.push('repeat'); };
   q('[data-testid="add-button"]').onclick = () => { toggle('[data-testid="add-button"]'); log.push('like'); };
-  q('[data-testid="play-button"]').onclick = () => { q('[data-testid="control-button-playpause"]').setAttribute('aria-label', 'Pausa'); log.push('context:' + location.pathname); };
-  document.querySelectorAll('[data-testid="tracklist-row"] button').forEach((b, i) => b.onclick = () => { index = i; show(); q('[data-testid="control-button-playpause"]').setAttribute('aria-label', 'Pausa'); log.push('track:' + i); });
+  q('[data-testid="play-button"]').onclick = () => { q('[data-testid="control-button-playpause"]').setAttribute('aria-label', 'Pause'); log.push('context:' + location.pathname); };
+  document.querySelectorAll('[data-testid="tracklist-row"] button').forEach((b, i) => b.onclick = () => { index = i; show(); q('[data-testid="control-button-playpause"]').setAttribute('aria-label', 'Pause'); log.push('track:' + i); });
   q('[data-testid="playback-progressbar"] input').addEventListener('change', e => log.push('seek:' + e.target.value));
   q('[data-testid="volume-bar"] input').addEventListener('change', e => log.push('volume:' + e.target.value));
   show();

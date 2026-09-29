@@ -31,7 +31,7 @@ const time = seconds => (Number.isFinite(seconds) && seconds > 0 ? `${Math.floor
 
 async function control(action, value) {
   const ok = await api.musicControl(action, value);
-  if (!ok && ['play', 'next', 'previous'].includes(action)) toast('Il player non è pronto: scegli prima un brano dalla libreria.', { action: { label: 'Libreria', run: () => emit('go', 'music') } });
+  if (!ok && ['play', 'next', 'previous'].includes(action)) toast('The player isn’t ready yet. Pick something from your library first.', { action: { label: 'Library', run: () => emit('go', 'music') } });
   setTimeout(refreshMusic, 350);
   setTimeout(refreshMusic, 1200);
 }
@@ -41,24 +41,24 @@ function cover(music, size = '') {
 }
 
 function progress(music) {
-  const bar = h('div.progress', { title: 'Vai a…', on: { click: event => { const rect = bar.getBoundingClientRect(); control('seek', (event.clientX - rect.left) / rect.width); } } }, h('i', { style: `width:${Math.min(100, (music.progress || 0) * 100)}%` }));
+  const bar = h('div.progress', { title: 'Seek', on: { click: event => { const rect = bar.getBoundingClientRect(); control('seek', (event.clientX - rect.left) / rect.width); } } }, h('i', { style: `width:${Math.min(100, (music.progress || 0) * 100)}%` }));
   return h('div', bar, h('div.times', h('span', time(music.position)), h('span', time(music.duration))));
 }
 
 function transport(music, big = false) {
   const btn = (name, action, title, extra = '') => h(`button.icon-btn${extra}`, { title, on: { click: () => control(action) } }, icon(name));
   return h('div.transport',
-    big ? btn('shuffle', 'shuffle', 'Casuale', music.shuffle ? '.on' : '') : null,
-    btn('skip-back', 'previous', 'Precedente'),
-    h('button.play', { title: music.paused ? 'Riproduci' : 'Pausa', on: { click: () => control('play') } }, icon(music.paused ? 'play' : 'pause')),
-    btn('skip-forward', 'next', 'Successivo'),
-    big ? btn(music.repeat === 'mixed' ? 'repeat-1' : 'repeat', 'repeat', 'Ripeti', music.repeat !== 'false' ? '.on' : '') : null);
+    big ? btn('shuffle', 'shuffle', 'Shuffle', music.shuffle ? '.on' : '') : null,
+    btn('skip-back', 'previous', 'Previous'),
+    h('button.play', { title: music.paused ? 'Play' : 'Pause', on: { click: () => control('play') } }, icon(music.paused ? 'play' : 'pause')),
+    btn('skip-forward', 'next', 'Next'),
+    big ? btn(music.repeat === 'mixed' ? 'repeat-1' : 'repeat', 'repeat', 'Repeat', music.repeat !== 'false' ? '.on' : '') : null);
 }
 
 function notReady(music) {
-  if (!music || music.loading) return { icon: 'music', title: 'Avvio del player…', text: 'Spotify si sta caricando in background.' };
-  if (music.missing) return { icon: 'music', title: 'Spotify non è collegato', text: 'Aggiungilo una volta: la musica suonerà dentro Nuvia, senza aprire altre app.', action: h('button.btn.sm', { on: { click: () => openAddService({ name: 'Spotify', url: 'https://open.spotify.com/' }) } }, icon('plus'), 'Collega Spotify') };
-  if (!music.connected) return { icon: 'log-in', title: 'Accedi a Spotify', text: 'Serve un accesso, poi il player resta collegato.', action: h('button.btn.sm', { on: { click: () => openSpotify() } }, 'Accedi') };
+  if (!music || music.loading) return { icon: 'music', title: 'Starting the player…', text: 'Spotify is loading in the background.' };
+  if (music.missing) return { icon: 'music', title: 'Spotify isn’t connected', text: 'Add it once and music plays inside Nuvia, no other app needed.', action: h('button.btn.sm', { on: { click: () => openAddService({ name: 'Spotify', url: 'https://open.spotify.com/' }) } }, icon('plus'), 'Connect Spotify') };
+  if (!music.connected) return { icon: 'log-in', title: 'Sign in to Spotify', text: 'Sign in once and the player stays connected.', action: h('button.btn.sm', { on: { click: () => openSpotify() } }, 'Sign in') };
   return null;
 }
 
@@ -91,14 +91,14 @@ function tintFrom(src) {
 // Widget
 
 defineWidget({
-  id: 'music', title: 'Musica', icon: 'music', size: 's', topics: ['music', 'services'],
+  id: 'music', title: 'Music', icon: 'music', size: 's', topics: ['music', 'services'],
   actions: () => [h('button.link', { on: { click: () => emit('go', 'music') } }, 'Player', icon('arrow-right'))],
   render(ctx) {
     const music = state.music;
     const blocked = notReady(music);
     if (blocked) { ctx.setMeta(''); return fill(ctx.body, empty(blocked.icon, blocked.title, blocked.text, blocked.action)); }
-    ctx.setMeta(music.paused ? 'in pausa' : 'in riproduzione');
-    if (!music.title) return fill(ctx.body, empty('disc-3', 'Niente in riproduzione', 'Scegli una playlist dal player.', h('button.btn.sm', { on: { click: () => emit('go', 'music') } }, icon('library'), 'Libreria')));
+    ctx.setMeta(music.paused ? 'paused' : 'playing');
+    if (!music.title) return fill(ctx.body, empty('disc-3', 'Nothing playing', 'Pick a playlist from the player.', h('button.btn.sm', { on: { click: () => emit('go', 'music') } }, icon('library'), 'Library')));
     fill(ctx.body, h('div.music-widget',
       h('div.player', cover(music), h('div.track', h('strong', music.title), h('span', music.artist), music.album ? h('span.muted', music.album) : null)),
       progress(music), transport(music)));
@@ -123,15 +123,15 @@ async function search(query) {
 
 function libraryGrid() {
   if (view.library === 'loading' || view.library === null) return skeleton(3);
-  if (!view.library.length) return empty('library', 'Libreria vuota o non ancora caricata', 'Apri Spotify una volta per sincronizzarla.', h('button.btn.sm', { on: { click: () => loadLibrary(true) } }, icon('refresh-cw'), 'Riprova'));
-  return h('div.library', view.library.map(item => h('button.tile', { type: 'button', title: `Riproduci ${item.name}`, on: { click: async () => { toast(`Riproduco ${item.name}…`); const ok = await api.musicPlayUri(item.uri); if (!ok) toast('Non sono riuscito ad avviare la riproduzione'); setTimeout(refreshMusic, 800); } } },
+  if (!view.library.length) return empty('library', 'Library empty or not loaded yet', 'Open Spotify once to sync it.', h('button.btn.sm', { on: { click: () => loadLibrary(true) } }, icon('refresh-cw'), 'Try again'));
+  return h('div.library', view.library.map(item => h('button.tile', { type: 'button', title: `Play ${item.name}`, on: { click: async () => { toast(`Playing ${item.name}…`); const ok = await api.musicPlayUri(item.uri); if (!ok) toast('Couldn’t start playback'); setTimeout(refreshMusic, 800); } } },
     h('div.art', { style: 'position:relative' }, icon('music'), art(item.image)), h('strong', item.name), h('span', item.subtitle || ''))));
 }
 
 function searchResults() {
   if (view.searching) return skeleton(5);
-  if (!view.results) return empty('search', 'Cerca un brano o un artista', '');
-  if (!view.results.length) return empty('search', 'Nessun risultato', `per “${view.query}”`);
+  if (!view.results) return empty('search', 'Search for a song or artist', '');
+  if (!view.results.length) return empty('search', 'No results', `for “${view.query}”`);
   return h('div.rows.tracks', view.results.map(track => h('button.row', { type: 'button', on: { click: async () => { await api.musicPlayTrack(track.index); setTimeout(refreshMusic, 700); } } },
     h('span.avatar', { style: 'position:relative' }, icon('music'), art(track.image)),
     h('div.main', h('div.line1', h('strong', track.title)), h('div.line2', track.artist)),
@@ -145,23 +145,23 @@ function heroSection(music) {
     h('div.tint'),
     cover(music),
     h('div',
-      h('span.tag', music.paused ? 'In pausa' : 'In riproduzione'),
-      h('h2', music.title || 'Niente in riproduzione'),
-      h('div.artist', music.artist || 'Scegli qualcosa dalla libreria qui sotto'),
+      h('span.tag', music.paused ? 'Paused' : 'Playing'),
+      h('h2', music.title || 'Nothing playing'),
+      h('div.artist', music.artist || 'Pick something from your library below'),
       music.album ? h('div.album', music.album) : null,
       h('div.controls',
         music.title ? progress(music) : null,
         transport(music, true),
         h('div.row-tools',
-          h(`button.icon-btn${music.liked ? '.on' : ''}`, { title: music.liked ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti', on: { click: () => control('like') } }, icon('heart')),
+          h(`button.icon-btn${music.liked ? '.on' : ''}`, { title: music.liked ? 'Remove from Liked Songs' : 'Add to Liked Songs', on: { click: () => control('like') } }, icon('heart')),
           volume ? h('span.dim', { style: 'display:inline-flex;gap:6px;align-items:center' }, icon('volume-2'), volume) : null,
-          h('button.btn.sm.ghost', { on: { click: openSpotify } }, icon('external-link'), 'Mostra Spotify')))));
+          h('button.btn.sm.ghost', { on: { click: openSpotify } }, icon('external-link'), 'Show Spotify')))));
 }
 
 function bodySection() {
-  const searchInput = h('input', { type: 'search', placeholder: 'Cerca su Spotify', value: view.query, on: { input: event => { view.query = event.target.value; }, keydown: event => { if (event.key === 'Enter' && event.target.value.trim()) search(event.target.value.trim()); } } });
+  const searchInput = h('input', { type: 'search', placeholder: 'Search Spotify', value: view.query, on: { input: event => { view.query = event.target.value; }, keydown: event => { if (event.key === 'Enter' && event.target.value.trim()) search(event.target.value.trim()); } } });
   return h('section.music-body',
-    h('div.page-head', h('div.segmented', ['library', 'search'].map(tab => h(`button${view.tab === tab ? '.on' : ''}`, { on: { click: () => { view.tab = tab; renderBody(); if (tab === 'library') loadLibrary(); } } }, icon(tab === 'library' ? 'library' : 'search'), tab === 'library' ? 'Libreria' : 'Cerca'))),
+    h('div.page-head', h('div.segmented', ['library', 'search'].map(tab => h(`button${view.tab === tab ? '.on' : ''}`, { on: { click: () => { view.tab = tab; renderBody(); if (tab === 'library') loadLibrary(); } } }, icon(tab === 'library' ? 'library' : 'search'), tab === 'library' ? 'Library' : 'Search'))),
       h('div.actions', searchInput)),
     view.tab === 'library' ? libraryGrid() : searchResults());
 }

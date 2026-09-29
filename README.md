@@ -1,40 +1,43 @@
-<p align="center"><img src="assets/icon.png" width="112" alt="Nuvia"></p>
+<p align="center"><img src="assets/logo-mark.png" width="120" alt="Nuvia"></p>
 
 <h1 align="center">Nuvia</h1>
 
-Tutti i tuoi servizi web in una finestra: Gmail, Outlook, WhatsApp, Telegram, Mattermost, Spotify, Notion, Claude, Codex e qualsiasi altro sito. Ogni servizio ha un profilo separato e persistente, così fai il login una volta sola. Una panoramica configurabile riunisce posta, agenda, chat, musica e altro.
+<p align="center">All your web apps in one window: mail, chats, calendar, music and more, with sessions that stay signed in.<br>
+Windows · macOS · Linux</p>
 
-Funziona su **Windows 10/11**, **macOS** (Apple Silicon e Intel) e **Linux** (Ubuntu, Debian, Fedora e qualsiasi distribuzione tramite AppImage).
+<p align="center"><a href="https://github.com/mirovix/nuvia/releases/latest"><b>Download the latest release</b></a></p>
 
-![Panoramica](docs/screenshots/1-panoramica.png)
+![Overview](docs/screenshots/overview.png)
 
-## Scarica
+Nuvia runs Gmail, Outlook, WhatsApp, Telegram, Mattermost, Spotify, Notion, Claude, Codex and any other website side by side. Each one lives in its own persistent profile, so you sign in once. A customizable overview brings together new mail, your agenda, every chat, what's playing and your commute.
 
-Le ultime versioni sono nella pagina **[Releases](https://github.com/mirovix/nuvia/releases/latest)**.
+## Download
 
-| Sistema | File | Note |
+Every build is on the **[Releases page](https://github.com/mirovix/nuvia/releases/latest)**.
+
+| System | File | Notes |
 | --- | --- | --- |
-| Windows 10/11 (64 bit) | `Nuvia-Setup-<versione>.exe` | Installer. In alternativa `Nuvia-<versione>-portable.exe`, che non richiede installazione. |
-| macOS Apple Silicon (M1/M2/M3/M4) | `Nuvia-<versione>-mac-arm64.dmg` | |
-| macOS Intel | `Nuvia-<versione>-mac-x64.dmg` | |
-| Ubuntu / Debian / Mint | `Nuvia-<versione>-amd64.deb` | |
-| Fedora / openSUSE / RHEL | `Nuvia-<versione>-x86_64.rpm` | |
-| Qualsiasi Linux | `Nuvia-<versione>-x86_64.AppImage` | Nessuna installazione. |
+| Windows 10 / 11 (64-bit) | `Nuvia-Setup-<version>.exe` | Installer. `Nuvia-<version>-portable.exe` runs without installing. |
+| macOS, Apple Silicon (M1–M4) | `Nuvia-<version>-mac-arm64.dmg` | |
+| macOS, Intel | `Nuvia-<version>-mac-x64.dmg` | |
+| Ubuntu / Debian / Mint | `Nuvia-<version>-amd64.deb` | |
+| Fedora / openSUSE / RHEL | `Nuvia-<version>-x86_64.rpm` | |
+| Any Linux | `Nuvia-<version>-x86_64.AppImage` | No install needed. |
 
-`SHA256SUMS.txt` contiene le impronte dei file, per verificare i download.
+`SHA256SUMS.txt` lists the checksums of every file.
 
-## Installazione
+## Install
 
 ### Windows
 
-1. Scarica ed esegui `Nuvia-Setup-<versione>.exe`.
-2. L'app non ha una firma digitale, quindi Windows SmartScreen potrebbe mostrare "Windows ha protetto il PC". Clicca **Ulteriori informazioni → Esegui comunque**.
-3. Nuvia compare nel menu Start e sul desktop.
+1. Download and run `Nuvia-Setup-<version>.exe`.
+2. The app isn't code-signed yet, so SmartScreen may say "Windows protected your PC". Click **More info → Run anyway**.
+3. Nuvia appears in the Start menu and on the desktop.
 
 ### macOS
 
-1. Apri il `.dmg` adatto al tuo Mac e trascina **Nuvia** in **Applicazioni**.
-2. L'app non è notarizzata da Apple. La prima volta aprila con **clic destro → Apri → Apri**. Se macOS dice che l'app "è danneggiata", sblocca la quarantena dal Terminale:
+1. Open the `.dmg` for your Mac and drag **Nuvia** into **Applications**.
+2. The app isn't notarized by Apple yet. The first time, right-click it and choose **Open → Open**. If macOS says the app "is damaged", clear the quarantine flag:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/Nuvia.app
@@ -45,65 +48,71 @@ Le ultime versioni sono nella pagina **[Releases](https://github.com/mirovix/nuv
 **Ubuntu / Debian**
 
 ```bash
-sudo apt install ./Nuvia-<versione>-amd64.deb
+sudo apt install ./Nuvia-<version>-amd64.deb
 ```
 
 **Fedora / RHEL**
 
 ```bash
-sudo dnf install ./Nuvia-<versione>-x86_64.rpm
+sudo dnf install ./Nuvia-<version>-x86_64.rpm
 ```
 
-**AppImage (qualsiasi distribuzione)**
+**AppImage (any distribution)**
 
 ```bash
-chmod +x Nuvia-<versione>-x86_64.AppImage
-./Nuvia-<versione>-x86_64.AppImage
+chmod +x Nuvia-<version>-x86_64.AppImage
+./Nuvia-<version>-x86_64.AppImage
 ```
 
-Su Ubuntu 22.04 e successive, se l'AppImage non parte, installa `libfuse2`: `sudo apt install libfuse2`.
+On Ubuntu 22.04 and later the AppImage needs `libfuse2` (`sudo apt install libfuse2`).
 
-## Cosa fa
+## Features
 
-- **Panoramica** con blocchi da mostrare, ordinare (trascinandoli dalla maniglia) e ridimensionare, ognuno con le sue opzioni.
-- **Posta**: anteprima delle nuove email di Gmail e Outlook; un clic apre il messaggio.
-- **Messaggi**: WhatsApp, Telegram e Mattermost in un'unica conversazione cronologica, con risposta rapida.
-- **Calendario**: agenda unica da Google Calendar, Outlook e link iCal.
-- **Musica**: player interno basato su Spotify Web, con copertina, artista, album, avanzamento, volume, libreria e ricerca. Non apre l'app di Spotify.
-- **Verso casa**: percorso con partenza A e arrivo B su mappa, indicazioni in italiano, auto, bici o a piedi. Gli indirizzi vengono verificati sulla città indicata.
-- **Claude & Codex**: quanto del limite di 5 ore e di quello settimanale hai usato, quando si azzerano e quanti token hai consumato.
-- **Notifiche** con pannello e cancellazione, **meteo**, **treni** (ViaggiaTreno), **Notion**.
-- Estensioni dal Chrome Web Store, attivabili servizio per servizio.
-- Tema scuro, chiaro o di sistema, sei colori d'accento, sfondi e barra laterale compatta.
-- Scorciatoie: `Ctrl/⌘+1…9` servizi, `Ctrl/⌘+0` panoramica, `Ctrl/⌘+K` vai a…, `Ctrl/⌘+R` ricarica, `Ctrl/⌘+,` impostazioni.
+- **Overview** made of widgets you can show, reorder (drag them by the handle), resize and configure one by one.
+- **Mail**: previews of new Gmail and Outlook messages; one click opens the thread.
+- **Messages**: WhatsApp, Telegram and Mattermost in a single timeline that reads like one chat, with quick replies.
+- **Calendar**: one agenda from Google Calendar, Outlook and any iCal link.
+- **Music**: a built-in player on top of Spotify Web, with artwork, artist, album, progress, volume, library and search. It never opens the Spotify app.
+- **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed.
+- **Claude & Codex**: how much of the 5-hour and weekly limits you've used, when they reset, and how many tokens you've spent.
+- **Notifications** panel, **weather**, Italian **trains** (ViaggiaTreno, with delay alerts) and **Notion** shortcuts.
+- Chrome Web Store **extensions**, enabled per service.
+- Dark, light or system theme, seven accent colours, backgrounds and a compact sidebar.
+- Shortcuts: `Ctrl/⌘+1…9` services, `Ctrl/⌘+0` overview, `Ctrl/⌘+K` go to…, `Ctrl/⌘+R` reload, `Ctrl/⌘+,` settings.
 
 | | |
 | --- | --- |
-| ![Messaggi](docs/screenshots/3-messaggi.png) | ![Musica](docs/screenshots/4-musica.png) |
-| ![Verso casa](docs/screenshots/2-verso-casa.png) | ![Claude & Codex](docs/screenshots/6-claude-codex.png) |
+| ![Messages](docs/screenshots/messages.png) | ![Music](docs/screenshots/music.png) |
+| ![Commute](docs/screenshots/commute.png) | ![Claude & Codex](docs/screenshots/claude-codex.png) |
 
 ## Privacy
 
-- Nuvia non legge né memorizza le password. Il login resta nel profilo Chromium locale di ogni servizio, sul tuo computer.
-- Anteprime di posta e chat, agenda e stato del player vengono lette dalle pagine dei servizi già aperte in Nuvia. Non passano da nessun server esterno.
-- **Claude & Codex** legge i log di sessione locali di Claude Code (`~/.claude`) e Codex (`~/.codex`). Se aggiungi Claude come servizio, legge anche la pagina di utilizzo del tuo account claude.ai. Nessuna credenziale viene letta.
-- Le estensioni non vengono mai caricate nell'interfaccia di Nuvia, solo nei servizi in cui le attivi.
+- Nuvia never reads or stores your service passwords. Each login stays in a local Chromium profile on your computer.
+- Mail and chat previews, the agenda and the player state are read from the service pages already open in Nuvia. Nothing goes through a third-party server.
+- **Claude & Codex** reads the local session logs of Claude Code (`~/.claude`) and Codex (`~/.codex`). If you add Claude as a service, it also reads the usage page of your claude.ai account. No credentials are read.
+- Extensions are never loaded into Nuvia's own interface, only into the services where you enable them.
 
-## Estensioni
+## Extensions
 
-Dal pulsante **Estensioni** cerchi nel Chrome Web Store e installi con un clic. Ogni estensione si attiva di default solo sui servizi a cui si rivolge: Streak, per esempio, solo su Gmail. Puoi accenderla o spegnerla per ogni servizio.
+Search the Chrome Web Store from **Extensions** and install with one click. By default an extension is enabled only on the services it targets (Streak, for example, only on Gmail), and you can switch it on or off per service.
 
-Electron supporta solo una parte delle API di Chrome. Se un'estensione fa chiudere Nuvia, o fa cadere più volte un servizio, viene disattivata su quel servizio e ricevi una notifica.
+Electron supports a subset of the Chrome extension APIs. If an extension crashes Nuvia, or crashes a service repeatedly, Nuvia disables it on that service and tells you.
 
-## Note
+## Integrations
 
-- **Spotify e contenuti protetti**: Nuvia usa [Electron for Content Security](https://github.com/castlabs/electron-releases) (castlabs), con Widevine. Su Windows e macOS alcuni servizi di streaming richiedono una firma VMP di castlabs per riprodurre contenuti protetti. Le build pubblicate non la includono, quindi su quei sistemi la riproduzione potrebbe non partire.
-- **Integrazioni facoltative**: *IAS Lab* (registrazione ai laboratori DEI) e *Ritardometro* si configurano in **Impostazioni → Integrazioni**, indicando le cartelle dei rispettivi progetti. IAS Lab richiede le variabili d'ambiente `DEI_USER` e `DEI_PASSWORD` e Python.
-- I dati dell'app si trovano in `%APPDATA%\nuvia-desktop` (Windows), `~/Library/Application Support/nuvia-desktop` (macOS) e `~/.config/nuvia-desktop` (Linux).
+Two optional integrations for the University of Padova, both configured in **Settings → Integrations**:
 
-## Sviluppo
+- **IAS Lab (DEI Labs)**: check in to and out of a DEI lab with one click. Nuvia asks for your DEI credentials once, keeps the session and stores the password encrypted in the system keychain. Based on [log_ias_lab](https://github.com/mirovix/log_ias_lab).
+- **Trains (Ritardometro)**: live departures from your station towards the destinations you pick, plus a notification when a watched train is late. The first configuration is imported from [ritardometro](https://github.com/mirovix/ritardometro).
 
-Servono Node.js 22 e git.
+## Notes
+
+- **Spotify and DRM**: Nuvia is built on [Electron for Content Security](https://github.com/castlabs/electron-releases) by castlabs, which ships Widevine. On Windows and macOS some streaming services also require castlabs VMP signing to play protected content. The published builds aren't VMP-signed, so playback may not start on those systems.
+- **App data** lives in `%APPDATA%\nuvia-desktop` (Windows), `~/Library/Application Support/nuvia-desktop` (macOS) and `~/.config/nuvia-desktop` (Linux).
+
+## Development
+
+You need Node.js 22 and git.
 
 ```bash
 git clone https://github.com/mirovix/nuvia.git
@@ -112,33 +121,33 @@ npm install
 npm start
 ```
 
-### Test
+### Tests
 
 ```bash
-npm test                  # unitari: indirizzi, percorsi, iCal, parser, consumi, estensioni
-npm run test:ui           # end-to-end su ogni pagina e pulsante, con servizi simulati (Linux + xvfb)
-npm run test:integration  # contro i servizi reali: rete, Chrome Web Store, Spotify DRM, WhatsApp
+npm test                  # unit: addresses, routing, iCal, parsers, usage, extensions
+npm run test:ui           # end-to-end on every page and button, with simulated services (Linux + xvfb)
+npm run test:integration  # against the real services: network, Chrome Web Store, Spotify DRM, WhatsApp
 ```
 
-### Pacchetti
+### Packages
 
 ```bash
 npm run pack:linux   # AppImage, deb, rpm, tar.gz
-npm run pack:win     # installer NSIS e versione portable
-npm run pack:mac     # dmg e zip (solo da macOS)
+npm run pack:win     # NSIS installer and portable exe
+npm run pack:mac     # dmg and zip (macOS only)
 ```
 
-### Pubblicare una versione
+### Releasing
 
-Aggiorna `version` in `package.json`, poi:
+Bump `version` in `package.json`, then:
 
 ```bash
 git tag v0.6.0
 git push origin v0.6.0
 ```
 
-Il workflow [Release](.github/workflows/release.yml) compila su Linux, Windows e macOS e pubblica tutti i file in una nuova Release.
+The [Release workflow](.github/workflows/release.yml) builds on Linux, Windows and macOS and publishes every file to a new GitHub Release.
 
-## Crediti
+## Credits
 
-[Electron](https://www.electronjs.org/) (build castlabs ECS), [Leaflet](https://leafletjs.com/) e © [OpenStreetMap](https://www.openstreetmap.org/copyright), geocoding [Nominatim](https://nominatim.org/), percorsi [OSRM](https://project-osrm.org/) su server FOSSGIS, meteo [Open-Meteo](https://open-meteo.com/), icone [Lucide](https://lucide.dev/) (ISC), font Instrument Sans e Instrument Serif e JetBrains Mono (SIL OFL). Dettagli in [THIRD_PARTY.md](THIRD_PARTY.md).
+[Electron](https://www.electronjs.org/) (castlabs ECS build), [Leaflet](https://leafletjs.com/) and © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, [Nominatim](https://nominatim.org/) geocoding, [OSRM](https://project-osrm.org/) routing on FOSSGIS servers, [Open-Meteo](https://open-meteo.com/) weather, [Lucide](https://lucide.dev/) icons (ISC), Instrument Sans, Instrument Serif and JetBrains Mono fonts (SIL OFL). Details in [THIRD_PARTY.md](THIRD_PARTY.md).

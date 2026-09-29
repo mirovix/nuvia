@@ -8,7 +8,7 @@ import { codexUsage, claudeUsage, claudeBlocks, normalizeClaudeLimits } from '..
 const now = Date.parse('2026-09-29T14:00:00Z');
 const iso = offsetMinutes => new Date(now + offsetMinutes * 60000).toISOString();
 
-test('codexUsage legge limiti e token dai rollout', () => {
+test('codexUsage reads limits and tokens from rollouts', () => {
   const root = mkdtempSync(join(tmpdir(), 'codex-'));
   const dir = join(root, 'sessions', '2026', '09', '29'); mkdirSync(dir, { recursive: true });
   const line = (offset, total, rate) => JSON.stringify({ timestamp: iso(offset), type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { total_tokens: total, input_tokens: total - 10, cached_input_tokens: 5, output_tokens: 10 } }, rate_limits: rate } });
@@ -17,7 +17,7 @@ test('codexUsage legge limiti e token dai rollout', () => {
     line(-400, 1000, { plan_type: 'plus', primary: null, secondary: null }),
     line(-60, 500, { plan_type: 'plus', primary: { used_percent: 40, window_minutes: 300, resets_at: Math.floor((now + 3600000) / 1000) }, secondary: { used_percent: 10, window_minutes: 10080, resets_at: Math.floor((now + 86400000) / 1000) } }),
     line(-10, 250, { plan_type: 'plus', primary: null, secondary: null }),
-    'riga non json'
+    'not json'
   ].join('\n'));
   const usage = codexUsage({ root, now });
   assert.equal(usage.plan, 'plus');
@@ -33,7 +33,7 @@ test('codexUsage legge limiti e token dai rollout', () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test('claudeUsage deduplica i messaggi e ricostruisce la finestra di 5 ore', () => {
+test('claudeUsage dedupes messages and rebuilds the 5-hour window', () => {
   const root = mkdtempSync(join(tmpdir(), 'claude-'));
   const dir = join(root, 'projects', 'p'); mkdirSync(dir, { recursive: true });
   const message = (offset, id, tokens, model = 'claude-opus-5-5') => JSON.stringify({ timestamp: iso(offset), requestId: `r${id}`, message: { id: `m${id}`, model, usage: { input_tokens: tokens, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } });
@@ -49,7 +49,7 @@ test('claudeUsage deduplica i messaggi e ricostruisce la finestra di 5 ore', () 
   rmSync(root, { recursive: true, force: true });
 });
 
-test('claudeBlocks apre un nuovo blocco dopo 5 ore', () => {
+test('claudeBlocks starts a new block after 5 hours', () => {
   const { blocks, active } = claudeBlocks([{ at: now - 7 * 3600000, tokens: 1 }, { at: now - 6 * 3600000, tokens: 1 }, { at: now - 60000, tokens: 5 }], now);
   assert.equal(blocks.length, 2);
   assert.equal(active.tokens, 5);
@@ -63,7 +63,7 @@ test('normalizeClaudeLimits', () => {
   assert.equal(normalizeClaudeLimits(null), null);
 });
 
-test('log assenti non generano errori', () => {
+test('missing logs do not throw', () => {
   assert.equal(codexUsage({ root: '/percorso/inesistente', now }).available, false);
   assert.equal(claudeUsage({ root: '/percorso/inesistente', now }).available, false);
 });

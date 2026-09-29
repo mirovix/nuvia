@@ -38,9 +38,6 @@
     "directories": {
       "output": "dist"
     },
-    "asarUnpack": [
-      "scripts/**/*"
-    ],
     "files": [
       "main.js",
       "preload.cjs",
@@ -50,7 +47,6 @@
       "ui/**/*",
       "node_modules/leaflet/dist/**/*",
       "assets/**/*",
-      "scripts/ias_bridge.py",
       "!scripts/after-pack.cjs"
     ],
     "linux": {

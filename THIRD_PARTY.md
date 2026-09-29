@@ -1,18 +1,18 @@
-# Componenti di terze parti
+# Third-party components
 
-| Componente | Uso | Licenza |
+| Component | Used for | License |
 | --- | --- | --- |
-| [Electron for Content Security](https://github.com/castlabs/electron-releases) (castlabs) | runtime dell'app, con Widevine | MIT (Electron) + termini castlabs |
-| [Leaflet](https://github.com/Leaflet/Leaflet) | mappa del percorso | BSD-2-Clause |
-| [yauzl](https://github.com/thejoshwolfe/yauzl) | estrazione dei pacchetti delle estensioni | MIT |
-| [Lucide](https://lucide.dev/) | icone (`ui/icons.js`, generato da `lucide-static`) | ISC |
-| Instrument Sans, Instrument Serif | font dell'interfaccia (`assets/fonts`) | SIL Open Font License 1.1 |
-| JetBrains Mono | font per numeri e dati (`assets/fonts`) | SIL Open Font License 1.1 |
+| [Electron for Content Security](https://github.com/castlabs/electron-releases) (castlabs) | app runtime, with Widevine | MIT (Electron) + castlabs terms |
+| [Leaflet](https://github.com/Leaflet/Leaflet) | route map | BSD-2-Clause |
+| [yauzl](https://github.com/thejoshwolfe/yauzl) | unpacking extension packages | MIT |
+| [Lucide](https://lucide.dev/) | icons (`ui/icons.js`, generated from `lucide-static`) | ISC |
+| Instrument Sans, Instrument Serif | interface fonts (`assets/fonts`) | SIL Open Font License 1.1 |
+| JetBrains Mono | numbers and data (`assets/fonts`) | SIL Open Font License 1.1 |
 
-Servizi online usati a runtime:
+Online services used at runtime:
 
-- Mappe: © contributori [OpenStreetMap](https://www.openstreetmap.org/copyright), tile di openstreetmap.org.
-- Geocoding: [Nominatim](https://operations.osmfoundation.org/policies/nominatim/), al massimo una richiesta al secondo.
-- Percorsi: [OSRM](https://project-osrm.org/) su routing.openstreetmap.de (FOSSGIS).
-- Meteo: [Open-Meteo](https://open-meteo.com/).
-- Treni: ViaggiaTreno.
+- Maps: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, tiles from openstreetmap.org.
+- Geocoding: [Nominatim](https://operations.osmfoundation.org/policies/nominatim/), at most one request per second.
+- Routing: [OSRM](https://project-osrm.org/) on routing.openstreetmap.de (FOSSGIS).
+- Weather: [Open-Meteo](https://open-meteo.com/).
+- Trains: ViaggiaTreno (Trenitalia).

@@ -18,21 +18,21 @@ function notificationRow(item, compact = false) {
   return h(`div.notif${item.read ? '' : '.unread'}`, { dataset: { id: item.id } },
     h('span.n-icon', icon(TYPE_ICON[item.type] || 'bell')),
     h('div', h('strong', item.title || 'Nuvia'), item.body ? h('p', item.body) : null, h('time', relativeTime(Date.parse(item.time)))),
-    h('button.icon-btn.small.delete-notification', { title: 'Elimina', on: { click: event => { event.stopPropagation(); remove(item.id); } } }, icon('x')));
+    h('button.icon-btn.small.delete-notification', { title: 'Delete', on: { click: event => { event.stopPropagation(); remove(item.id); } } }, icon('x')));
 }
 
 function list(limit) {
   const items = state.notifications.slice(0, limit);
-  return items.length ? items.map(item => notificationRow(item)) : [empty('bell-off', 'Nessuna notifica', 'Treni in ritardo, nuove email e avvisi arrivano qui.')];
+  return items.length ? items.map(item => notificationRow(item)) : [empty('bell-off', 'No notifications', 'Train delays, new emails and alerts show up here.')];
 }
 
 export async function openPanel(anchor) {
   const body = h('div.notif-list');
   const render = () => fill(body, list(80));
   const dialog = await popover(anchor, [
-    h('div.pop-head', h('h3', 'Notifiche'),
-      h('button.icon-btn.small', { title: 'Segna tutte come lette', on: { click: async () => { await api.readAllNotifications(); await refreshNotifications(); } } }, icon('check-check')),
-      h('button.btn.sm.ghost#clear-notifications', { on: { click: clearAll } }, icon('trash-2'), 'Cancella tutte')),
+    h('div.pop-head', h('h3', 'Notifications'),
+      h('button.icon-btn.small', { title: 'Mark all as read', on: { click: async () => { await api.readAllNotifications(); await refreshNotifications(); } } }, icon('check-check')),
+      h('button.btn.sm.ghost#clear-notifications', { on: { click: clearAll } }, icon('trash-2'), 'Clear all')),
     body], { cls: 'notif-panel', width: 380 });
   render();
   const off = on('notifications', render);
@@ -40,12 +40,12 @@ export async function openPanel(anchor) {
 }
 
 defineWidget({
-  id: 'notifications', title: 'Notifiche', icon: 'bell', size: 's', topics: ['notifications'],
-  options: [{ key: 'max', type: 'number', label: 'Quante mostrarne', default: 8, min: 3, max: 40 }],
-  actions: () => [h('button.icon-btn.small', { title: 'Cancella tutte', on: { click: clearAll } }, icon('trash-2'))],
+  id: 'notifications', title: 'Notifications', icon: 'bell', size: 's', topics: ['notifications'],
+  options: [{ key: 'max', type: 'number', label: 'How many to show', default: 8, min: 3, max: 40 }],
+  actions: () => [h('button.icon-btn.small', { title: 'Clear all', on: { click: clearAll } }, icon('trash-2'))],
   render(ctx) {
     const unread = state.notifications.filter(item => !item.read).length;
-    ctx.setMeta(state.notifications.length ? `${unread} nuove · ${state.notifications.length} totali` : 'tutto tranquillo');
+    ctx.setMeta(state.notifications.length ? `${unread} new · ${state.notifications.length} total` : 'all quiet');
     fill(ctx.body, h('div', list(ctx.options.max)));
   }
 });

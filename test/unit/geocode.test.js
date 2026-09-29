@@ -4,7 +4,7 @@ import { parseAddress, queryVariants, rankPlaces, geocode } from '../../lib/geoc
 
 const place = (road, number, town, extra = {}) => ({ osm_type: 'way', osm_id: `${road}${number}${town}`, lat: '45.4', lon: '11.8', importance: 0.2, display_name: `${number}, ${road}, ${town}, Italia`, address: { road, house_number: number, city: town, postcode: extra.postcode }, ...extra });
 
-test('parseAddress separa via, civico, CAP e città', () => {
+test('parseAddress splits street, number, postcode and city', () => {
   assert.deepEqual(
     (({ street, number, postcode, city }) => ({ street, number, postcode, city }))(parseAddress('Corso Palladio 98 vicenza 36100')),
     { street: 'Corso Palladio', number: '98', postcode: '36100', city: 'vicenza' });
@@ -16,13 +16,13 @@ test('parseAddress separa via, civico, CAP e città', () => {
   assert.equal(guess.streetGuess, 'Via tiepolo');
 });
 
-test('queryVariants aggiunge la ricerca strutturata e quella senza "Via"', () => {
+test('queryVariants adds structured and prefix-less queries', () => {
   const variants = queryVariants(parseAddress('Via tiepolo padova'));
   assert.ok(variants.some(v => v.street === 'Via tiepolo' && v.city === 'padova'));
   assert.ok(variants.some(v => v.q === 'tiepolo padova'));
 });
 
-test('rankPlaces preferisce la città scritta (Tiepolo, Padova e non Camposampiero)', () => {
+test('rankPlaces prefers the typed city (Tiepolo in Padova, not Camposampiero)', () => {
   const parsed = parseAddress('Via tiepolo padova');
   const ranked = rankPlaces([
     place('Via Tiepolo', '', 'Camposampiero', { importance: 0.3 }),
@@ -32,13 +32,13 @@ test('rankPlaces preferisce la città scritta (Tiepolo, Padova e non Camposampie
   assert.equal(ranked[0].label, 'Via Giovanni Battista Tiepolo, Padova');
 });
 
-test('rankPlaces premia civico e CAP', () => {
+test('rankPlaces rewards house number and postcode', () => {
   const parsed = parseAddress('Corso Palladio 98', 'Vicenza');
   const ranked = rankPlaces([place('Corso Palladio', '12', 'Vicenza'), place('Corso Andrea Palladio', '98', 'Vicenza', { postcode: '36100' }), place('Corso Palladio', '98', 'Verona')], parsed);
   assert.equal(ranked[0].label, 'Corso Andrea Palladio 98, Vicenza');
 });
 
-test('geocode interroga le varianti e ordina i risultati', async () => {
+test('geocode queries the variants and ranks the results', async () => {
   const calls = [];
   const fetchImpl = async url => {
     calls.push(url);
@@ -49,4 +49,13 @@ test('geocode interroga le varianti e ordina i risultati', async () => {
   const result = await geocode('Via tiepolo padova', { fetchImpl, baseUrl: 'http://mock' });
   assert.equal(result[0].label, 'Via Giovanni Battista Tiepolo, Padova');
   assert.ok(calls.length >= 2);
+});
+
+test('geocode searches worldwide in English and matches English street suffixes', async () => {
+  const calls = [];
+  const fetchImpl = async url => { calls.push(new URL(url).searchParams); return { ok: true, json: async () => [place('Oxford Street', '221', 'London', { importance: 0.4 }), place('Baker St', '221', 'London')] }; };
+  const result = await geocode('Baker Street 221, London', { fetchImpl, baseUrl: 'http://mock-en' });
+  assert.equal(calls[0].get('accept-language'), 'native');
+  assert.equal(calls[0].has('countrycodes'), false);
+  assert.equal(result[0].label, 'Baker St 221, London');
 });

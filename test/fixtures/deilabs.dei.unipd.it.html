@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><title>DEI Labs</title></head>
+<body>
+<!-- Mimics the deilabs pages used by the built-in IAS integration: /login, /home, /laboratory_in_outs. -->
+<div id="app"></div>
+<script>
+  const app = document.getElementById('app');
+  const path = location.pathname;
+  const session = () => localStorage.getItem('session') === '1';
+  if (path === '/login') {
+    app.innerHTML = '<form onsubmit="return false"><input name="email"><input name="password" type="password"><button class="btn btn-primary">Login</button><p id="error"></p></form>';
+    document.querySelector('button').addEventListener('click', () => {
+      const ok = document.querySelector('[name=email]').value === 'test@unipd.it' && document.querySelector('[name=password]').value === 'segreta';
+      if (!ok) { document.getElementById('error').textContent = 'Credenziali errate'; return; }
+      localStorage.setItem('session', '1');
+      location.href = '/home';
+    });
+  } else if (!session()) {
+    // Like the real site: no redirect, just a notice.
+    app.innerHTML = '<h1>Login</h1><p>Session expired</p>';
+  } else if (path === '/laboratory_in_outs') {
+    const inside = localStorage.getItem('inside');
+    if (inside) {
+      app.innerHTML = `<form onsubmit="return false"><input type="submit" value="Exit from ${inside}"></form>`;
+      document.querySelector('input').addEventListener('click', () => { localStorage.removeItem('inside'); location.reload(); });
+    } else {
+      app.innerHTML = '<form onsubmit="return false"><select id="laboratory_id"><option value="">--</option><option value="1">DEI/O | SSL Lab</option><option value="2">DEI/O | Neurorobotics</option></select><input type="submit" value="Enter"></form>';
+      document.querySelector('input').addEventListener('click', () => { const s = document.getElementById('laboratory_id'); localStorage.setItem('inside', s.options[s.selectedIndex].text); location.reload(); });
+    }
+  } else {
+    app.textContent = 'Home';
+  }
+</script>
+</body></html>

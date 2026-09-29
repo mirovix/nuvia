@@ -45,7 +45,7 @@ SUMMARY:Annullato
 END:VEVENT
 END:VCALENDAR`.replace(/\n/g, '\r\n');
 
-test('parseICS legge fusi orari, testo e giorni interi', () => {
+test('parseICS reads time zones, text and all-day events', () => {
   const events = parseICS(ics);
   const single = events.find(event => event.uid === 'single');
   assert.equal(single.title, 'Lezione di Robotica, aula 1');
@@ -53,7 +53,7 @@ test('parseICS legge fusi orari, testo e giorni interi', () => {
   assert.equal(events.find(event => event.uid === 'allday').allDay, true);
 });
 
-test('expandEvents applica RRULE, EXDATE, override e annullati', () => {
+test('expandEvents applies RRULE, EXDATE, overrides and cancellations', () => {
   const list = expandEvents(parseICS(ics), new Date('2026-09-27T00:00:00Z'), new Date('2026-10-20T00:00:00Z'));
   const standups = list.filter(event => event.uid === 'weekly');
   assert.deepEqual(standups.map(event => event.start.toISOString()), ['2026-09-28T07:00:00.000Z', '2026-10-05T09:00:00.000Z', '2026-10-07T07:00:00.000Z']);
@@ -63,12 +63,12 @@ test('expandEvents applica RRULE, EXDATE, override e annullati', () => {
   for (let i = 1; i < list.length; i += 1) assert.ok(list[i - 1].start <= list[i].start);
 });
 
-test('zonedTimeToUtc gestisce ora legale e nomi Windows', () => {
+test('zonedTimeToUtc handles DST and Windows zone names', () => {
   assert.equal(zonedTimeToUtc(2026, 1, 15, 10, 0, 0, 'Europe/Rome').toISOString(), '2026-01-15T09:00:00.000Z');
   assert.equal(zonedTimeToUtc(2026, 7, 15, 10, 0, 0, 'W. Europe Standard Time').toISOString(), '2026-07-15T08:00:00.000Z');
 });
 
-test('ricorrenze giornaliere e mensili con UNTIL', () => {
+test('daily and monthly recurrences with UNTIL', () => {
   const text = 'BEGIN:VEVENT\nUID:d\nDTSTART:20260101T090000Z\nRRULE:FREQ=DAILY;INTERVAL=2;UNTIL=20260107T235959Z\nSUMMARY:D\nEND:VEVENT\nBEGIN:VEVENT\nUID:m\nDTSTART:20260115T090000Z\nRRULE:FREQ=MONTHLY;COUNT=3\nSUMMARY:M\nEND:VEVENT';
   const list = expandEvents(parseICS(text), new Date('2025-12-31'), new Date('2026-12-31'));
   assert.equal(list.filter(event => event.uid === 'd').length, 4);

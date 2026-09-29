@@ -36,9 +36,15 @@ function mockServer() {
       const start = new Date(); start.setHours(12, 0, 0, 0);
       const end = new Date(start); end.setHours(13);
       const tomorrow = new Date(start); tomorrow.setDate(tomorrow.getDate() + 1);
-      return send(`BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:${icsStamp(start)}\r\nDTEND:${icsStamp(end)}\r\nSUMMARY:Pranzo con Anna\r\nLOCATION:Mensa\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b\r\nDTSTART:${icsStamp(tomorrow)}\r\nSUMMARY:Consegna progetto\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`, 'text/calendar');
+      return send(`BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:${icsStamp(start)}\r\nDTEND:${icsStamp(end)}\r\nSUMMARY:Lunch with Anna\r\nLOCATION:Cafeteria\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b\r\nDTSTART:${icsStamp(tomorrow)}\r\nSUMMARY:Project deadline\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`, 'text/calendar');
     }
-    if (url.pathname === '/site') return send('<!doctype html><title>Sito di prova</title><h1>Sito di prova</h1>', 'text/html');
+    if (url.pathname.startsWith('/vt/autocompletaStazione/')) return send('PADOVA|S02581\nPADOVA CAMPO MARTE|S02650\n', 'text/plain');
+    if (url.pathname.startsWith('/vt/partenze/S02581/')) return send([
+      { compNumeroTreno: 'REG 3504', destinazione: 'VERONA PORTA NUOVA', compOrarioPartenza: '17:40', ritardo: 13, binarioProgrammatoPartenzaDescrizione: '3' },
+      { compNumeroTreno: 'REG 17103', destinazione: 'FERRARA', compOrarioPartenza: '17:41', ritardo: 0 },
+      { compNumeroTreno: 'RV 2214', destinazione: 'BRESCIA', compOrarioPartenza: '18:10', ritardo: 0, binarioProgrammatoPartenzaDescrizione: '4' }]);
+    if (url.pathname === '/ritardometro.yaml') return send('current_station: PADOVA\ndestinations:\n  - BRESCIA\n  - VERONA PORTA NUOVA\nhours:\n  - "16"\n  - "17"\nminutes:\n  - "40"\nlead_time: 20\nmax_delay_minutes: 1\n', 'text/plain');
+    if (url.pathname === '/site') return send('<!doctype html><title>Test site</title><h1>Test site</h1>', 'text/html');
     response.writeHead(404); response.end();
   });
   return new Promise(resolveServer => server.listen(0, '127.0.0.1', () => resolveServer(server)));
@@ -52,12 +58,12 @@ function extension(root, id, manifest, files = {}) {
   return dir;
 }
 
-test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
+test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
   const server = await mockServer();
   const base = `http://127.0.0.1:${server.address().port}`;
   const now = Date.now();
   const app = await launch({
-    env: { NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base },
+    env: { NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
     prepare: profile => {
       const fixtures = join(profile, 'fixtures');
       cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
@@ -75,9 +81,9 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
           { id: 'wa', name: 'WhatsApp', url: 'https://web.whatsapp.com/' },
           { id: 'spotify', name: 'Spotify', url: 'https://open.spotify.com/' },
           { id: 'claude', name: 'Claude', url: 'https://claude.ai/new' },
-          { id: 'site', name: 'Sito', url: `${base}/site` }
+          { id: 'site', name: 'Site', url: `${base}/site` }
         ],
-        'preferences.json': { migrations: ['ai-services-1'], name: 'Tester', city: 'Padova', calendar: { feeds: [{ id: 'ics-test', name: 'Università', url: `${base}/cal.ics` }] } },
+        'preferences.json': { migrations: ['ai-services-1'], name: 'Tester', city: 'Padova', calendar: { feeds: [{ id: 'ics-test', name: 'University', url: `${base}/cal.ics` }] } },
         'extensions.json': [helper, crashy],
         // Simulates a previous run that died while Crashy was loading into Gmail.
         'extension-guard.json': { running: true, crashes: 0, pending: { gmail: ['crashyext'] }, loaded: {} }
@@ -91,24 +97,24 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
     const text = selector => ui.eval(`return document.querySelector(${JSON.stringify(selector)})?.innerText || ''`);
     const debug = () => ui.eval('return window.nuvia.debugState()');
 
-    await t.test('avvio: interfaccia pronta e nessuna estensione nella UI', async () => {
+    await t.test('startup: UI ready and no extensions in the UI session', async () => {
       const info = await ui.eval(`return { bridge: Object.keys(window.nuvia), title: document.querySelector('#page-title').textContent, theme: document.documentElement.dataset.theme, widgets: [...document.querySelectorAll('.widget')].map(w => w.dataset.widget) }`);
       for (const key of ['mail', 'messages', 'calendarEvents', 'musicState', 'route', 'aiUsage', 'setOverlay']) assert.ok(info.bridge.includes(key), key);
-      assert.equal(info.title, 'Panoramica');
+      assert.equal(info.title, 'Overview');
       assert.equal(info.theme, 'dark');
       assert.deepEqual(info.widgets.slice(0, 3), ['mail', 'calendar', 'messages']);
       assert.equal((await debug()).uiExtensions, 0);
     });
 
-    await t.test('estensioni: quarantena dopo crash e attivazione solo dove serve', async () => {
+    await t.test('extensions: quarantine after a crash, enabled only where relevant', async () => {
       const list = await ui.eval('return window.nuvia.listExtensions()');
       const crashy = list.find(item => item.id === 'crashyext');
       const helper = list.find(item => item.id === 'mailhelper');
-      assert.equal(crashy.rules.gmail, false, 'Crashy va disattivata su Gmail');
+      assert.equal(crashy.rules.gmail, false, 'Crashy must be disabled on Gmail');
       assert.equal(helper.rules.gmail, true);
-      assert.equal(helper.rules.wa, false, 'un content script per Gmail non va su WhatsApp');
+      assert.equal(helper.rules.wa, false, 'a Gmail content script must not load on WhatsApp');
       const notifications = await ui.eval('return window.nuvia.listNotifications()');
-      assert.ok(notifications.some(item => /Crashy/.test(item.body) && item.title === 'Estensione disattivata'));
+      assert.ok(notifications.some(item => /Crashy/.test(item.body) && item.title === 'Extension disabled'));
       const gmail = await app.page(target => target.url.startsWith('https://mail.google.com'));
       assert.equal(await gmail.waitFor("document.documentElement.dataset.mailHelper"), 'on');
       gmail.close();
@@ -119,18 +125,18 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       await ui.eval(`document.querySelector('#extensions-dialog').close()`);
     });
 
-    await t.test('navigazione: ogni voce apre la sua pagina', async () => {
-      for (const [route, title] of [['messages', 'Messaggi'], ['calendar', 'Calendario'], ['music', 'Musica'], ['ai', 'Claude & Codex'], ['home', 'Panoramica']]) {
+    await t.test('navigation: every item opens its page', async () => {
+      for (const [route, title] of [['messages', 'Messages'], ['calendar', 'Calendar'], ['music', 'Music'], ['ai', 'Claude & Codex'], ['home', 'Overview']]) {
         await click(`[data-route="${route}"]`);
         await ui.waitFor(`!document.querySelector('#page-${route}').hidden && document.querySelector('#page-title').textContent === ${JSON.stringify(title)} && document.querySelector('[data-route="${route}"]').classList.contains('active')`);
       }
     });
 
-    await t.test('posta: anteprima delle email nuove e apertura del thread', async () => {
+    await t.test('mail: new email previews and opening the thread', async () => {
       await ui.waitFor(`document.querySelectorAll('.widget[data-widget="mail"] .row').length === 2`, { timeout: 30000 });
       const rows = await ui.eval(`return [...document.querySelectorAll('.widget[data-widget="mail"] .row')].map(row => row.innerText.replace(/\\s+/g, ' '))`);
-      assert.match(rows.join('|'), /Anna Rossi.*Verbale riunione.*Ti giro il verbale/);
-      assert.match(await text('.widget[data-widget="mail"] .w-meta'), /2 da leggere/);
+      assert.match(rows.join('|'), /Anna Rossi.*Meeting notes.*Here are today's notes/);
+      assert.match(await text('.widget[data-widget="mail"] .w-meta'), /2 unread/);
       await ui.eval(`[...document.querySelectorAll('.widget[data-widget="mail"] .row')].find(row => row.innerText.includes('Anna')).click()`);
       await ui.waitFor(`document.querySelector('#page-title').textContent === 'Gmail Test'`);
       const gmail = await app.page(target => target.url.startsWith('https://mail.google.com'));
@@ -140,24 +146,24 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       await click('[data-route="home"]');
     });
 
-    await t.test('messaggi: inbox unificata come una chat e risposta rapida', async () => {
+    await t.test('messages: unified inbox as one chat, quick reply', async () => {
       await click('[data-route="messages"]');
       await ui.waitFor(`document.querySelectorAll('#message-feed .bubble').length === 3`, { timeout: 30000 });
       const order = await ui.eval(`return [...document.querySelectorAll('#message-feed .bubble strong')].map(el => el.textContent)`);
-      assert.deepEqual(order, ['Gruppo Lab', 'Giulia', 'Mamma'], 'dal più vecchio al più recente, come una chat');
-      assert.ok(await ui.eval(`return [...document.querySelectorAll('#message-feed .day')].map(el => el.textContent).includes('Oggi') || document.querySelectorAll('#message-feed .day').length >= 2`));
+      assert.deepEqual(order, ['Lab group', 'Giulia', 'Mum'], 'oldest to newest, like a chat');
+      assert.ok(await ui.eval(`return [...document.querySelectorAll('#message-feed .day')].map(el => el.textContent).includes('Today') || document.querySelectorAll('#message-feed .day').length >= 2`));
       await ui.eval(`document.querySelector('#unread-filter input').click()`);
       await ui.waitFor(`document.querySelectorAll('#message-feed .bubble').length === 2`);
       await ui.eval(`document.querySelector('#unread-filter input').click()`);
-      await ui.eval(`const input = document.querySelector('.chat-head .search'); input.value = 'pane'; input.dispatchEvent(new Event('input'))`);
+      await ui.eval(`const input = document.querySelector('.chat-head .search'); input.value = 'bread'; input.dispatchEvent(new Event('input'))`);
       await ui.waitFor(`document.querySelectorAll('#message-feed .bubble').length === 1`);
       await ui.eval(`const input = document.querySelector('.chat-head .search'); input.value = ''; input.dispatchEvent(new Event('input'))`);
-      await ui.eval(`[...document.querySelectorAll('#message-feed .bubble')].find(b => b.innerText.includes('Mamma')).click()`);
-      await ui.waitFor(`!document.querySelector('#composer').hidden && document.querySelector('#reply-target').innerText.includes('Mamma')`);
+      await ui.eval(`[...document.querySelectorAll('#message-feed .bubble')].find(b => b.innerText.includes('Mum')).click()`);
+      await ui.waitFor(`!document.querySelector('#composer').hidden && document.querySelector('#reply-target').innerText.includes('Mum')`);
       await ui.eval(`const input = document.querySelector('#reply-input'); input.value = 'Ok, lo prendo io'; document.querySelector('#composer .btn.accent').click()`);
       const wa = await app.page(target => target.url.startsWith('https://web.whatsapp.com'));
       const sent = await wa.waitFor('window.sent.length && window.sent', { timeout: 15000 });
-      assert.deepEqual(sent[0], { chat: 'Mamma', text: 'Ok, lo prendo io' });
+      assert.deepEqual(sent[0], { chat: 'Mum', text: 'Ok, lo prendo io' });
       wa.close();
       await ui.eval(`[...document.querySelectorAll('#message-feed .bubble')].find(b => b.innerText.includes('Giulia')).dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
       await ui.waitFor(`document.querySelector('#page-title').textContent === 'WhatsApp'`);
@@ -165,37 +171,37 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       await ui.waitFor(`document.querySelectorAll('.widget[data-widget="messages"] .bubble').length === 3`);
     });
 
-    await t.test('calendario: eventi da Google e iCal, fonti attivabili, scorrimento', async () => {
+    await t.test('calendar: Google and iCal events, toggleable sources, scrolling', async () => {
       await ui.waitFor(`document.querySelector('.widget[data-widget="calendar"] .events')`, { timeout: 40000 });
       const today = await text('.widget[data-widget="calendar"] .events');
-      assert.match(today, /Pranzo con Anna/);
-      assert.match(today, /Revisione tesi/);
+      assert.match(today, /Lunch with Anna/);
+      assert.match(today, /Thesis review/);
       await ui.eval(`document.querySelectorAll('.widget[data-widget="calendar"] .week button')[1].click()`);
-      await ui.waitFor(`/Lezione di Robotica/.test(document.querySelector('.widget[data-widget="calendar"] .w-body').innerText) && /Consegna progetto/.test(document.querySelector('.widget[data-widget="calendar"] .w-body').innerText)`);
-      assert.equal(await ui.eval(`const w = document.querySelector('.widget[data-widget="calendar"]'); return w.draggable`), false, 'il blocco non deve essere trascinabile fuori dalla maniglia');
+      await ui.waitFor(`/Robotics lecture/.test(document.querySelector('.widget[data-widget="calendar"] .w-body').innerText) && /Project deadline/.test(document.querySelector('.widget[data-widget="calendar"] .w-body').innerText)`);
+      assert.equal(await ui.eval(`const w = document.querySelector('.widget[data-widget="calendar"]'); return w.draggable`), false, 'the widget must not be draggable outside its handle');
       await click('[data-route="calendar"]');
       await ui.waitFor(`document.querySelectorAll('#page-calendar .agenda-day').length >= 2`);
       const sources = await ui.eval(`return window.__nuviaDebug.state.calendar.sources.map(s => [s.name, s.ok, s.count])`);
-      assert.ok(sources.some(([name, ok, count]) => name === 'Università' && ok && count >= 2));
+      assert.ok(sources.some(([name, ok, count]) => name === 'University' && ok && count >= 2));
       assert.ok(sources.some(([name, ok, count]) => name === 'Gmail Test' && ok && count >= 3));
-      await ui.eval(`[...document.querySelectorAll('#page-calendar .card .check')].find(row => row.innerText.includes('Università')).querySelector('.toggle').click()`);
-      await ui.waitFor(`!/Pranzo con Anna/.test(document.querySelector('#page-calendar').innerText)`, { timeout: 20000 });
-      await ui.eval(`[...document.querySelectorAll('#page-calendar .card .check')].find(row => row.innerText.includes('Università')).querySelector('.toggle').click()`);
-      await ui.waitFor(`/Pranzo con Anna/.test(document.querySelector('#page-calendar').innerText)`, { timeout: 20000 });
+      await ui.eval(`[...document.querySelectorAll('#page-calendar .card .check')].find(row => row.innerText.includes('University')).querySelector('.toggle').click()`);
+      await ui.waitFor(`!/Lunch with Anna/.test(document.querySelector('#page-calendar').innerText)`, { timeout: 20000 });
+      await ui.eval(`[...document.querySelectorAll('#page-calendar .card .check')].find(row => row.innerText.includes('University')).querySelector('.toggle').click()`);
+      await ui.waitFor(`/Lunch with Anna/.test(document.querySelector('#page-calendar').innerText)`, { timeout: 20000 });
       await click('[data-route="home"]');
     });
 
-    await t.test('musica: player interno con copertina, artista e comandi', async () => {
+    await t.test('music: built-in player with artwork, artist and controls', async () => {
       const spotify = await app.page(target => target.url.startsWith('https://open.spotify.com'));
-      await ui.waitFor(`/Nuvole/.test(document.querySelector('.widget[data-widget="music"] .track')?.innerText) && /Artista Uno/.test(document.querySelector('.widget[data-widget="music"] .track').innerText)`, { timeout: 30000 });
+      await ui.waitFor(`/Clouds/.test(document.querySelector('.widget[data-widget="music"] .track')?.innerText) && /Artist One/.test(document.querySelector('.widget[data-widget="music"] .track').innerText)`, { timeout: 30000 });
       await ui.eval(`document.querySelector('.widget[data-widget="music"] .play').click()`);
       await ui.waitFor(`window.__nuviaDebug.state.music.paused === false`);
-      await ui.eval(`document.querySelector('.widget[data-widget="music"] [title="Successivo"]').click()`);
-      await ui.waitFor(`/Sereno/.test(document.querySelector('.widget[data-widget="music"] .track').innerText)`);
-      assert.equal((await debug()).attached, false, 'Spotify non deve aprirsi a schermo');
+      await ui.eval(`document.querySelector('.widget[data-widget="music"] [title="Next"]').click()`);
+      await ui.waitFor(`/Clear Skies/.test(document.querySelector('.widget[data-widget="music"] .track').innerText)`);
+      assert.equal((await debug()).attached, false, 'Spotify must not open on screen');
       await click('[data-route="music"]');
-      await ui.waitFor(`document.querySelector('.music-hero h2')?.textContent === 'Sereno' && document.querySelector('.music-hero .artist').textContent === 'Artista Due' && document.querySelector('.music-hero .album').textContent === 'Album Test'`);
-      for (const title of ['Casuale', 'Ripeti', 'Aggiungi ai preferiti', 'Precedente']) await ui.eval(`document.querySelector('.music-hero [title="${title}"]').click()`);
+      await ui.waitFor(`document.querySelector('.music-hero h2')?.textContent === 'Clear Skies' && document.querySelector('.music-hero .artist').textContent === 'Artist Two' && document.querySelector('.music-hero .album').textContent === 'Album Test'`);
+      for (const title of ['Shuffle', 'Repeat', 'Add to Liked Songs', 'Previous']) await ui.eval(`document.querySelector('.music-hero [title="${title}"]').click()`);
       await ui.eval(`const bar = document.querySelector('.music-hero .progress'); const r = bar.getBoundingClientRect(); bar.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + 2 }))`);
       await ui.eval(`const v = document.querySelector('.music-hero input[type=range]'); v.value = '80'; v.dispatchEvent(new Event('change'))`);
       const log = await spotify.waitFor(`window.log.includes('volume:0.8') && window.log`, { timeout: 10000 });
@@ -206,7 +212,7 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       // Playing a playlist navigates the hidden player, so its page (and log) is new.
       await spotify.waitFor(`window.log.includes('context:/playlist/37i9dQZF1DX0')`, { timeout: 20000 });
       await ui.eval(`document.querySelectorAll('#page-music .segmented button')[1].click()`);
-      await ui.eval(`const input = document.querySelector('#page-music .actions input'); input.value = 'nuvole'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
+      await ui.eval(`const input = document.querySelector('#page-music .actions input'); input.value = 'clouds'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
       await ui.waitFor(`document.querySelectorAll('#page-music .tracks .row').length === 2`, { timeout: 20000 });
       await ui.eval(`document.querySelectorAll('#page-music .tracks .row')[1].click()`);
       await spotify.waitFor(`window.log.includes('track:1')`);
@@ -214,25 +220,25 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       await click('[data-route="home"]');
     });
 
-    await t.test('Claude & Codex: limiti, reset e token', async () => {
+    await t.test('Claude & Codex: limits, resets and tokens', async () => {
       await ui.waitFor(`/63%/.test(document.querySelector('.widget[data-widget="ai"] .w-body')?.innerText) && /42%/.test(document.querySelector('.widget[data-widget="ai"] .w-body').innerText)`, { timeout: 40000 });
       await click('[data-route="ai"]');
       await ui.waitFor(`document.querySelectorAll('#page-ai .card').length === 2`);
       const page = await text('#page-ai');
-      assert.match(page, /Sessione · 5 ore/);
+      assert.match(page, /Session · 5 hours/);
       assert.match(page, /42%/);
       assert.match(page, /17%/);
       assert.match(page, /63%/);
       assert.match(page, /21%/);
-      assert.match(page, /si azzera tra 1 h 30 min/);
+      assert.match(page, /resets in 1 h 30 min/);
       assert.match(page, /claude max 5x/i);
-      assert.match(page, /1,2 mln/);
+      assert.match(page, /1\.2M/);
       await ui.eval(`[...document.querySelectorAll('#page-ai .card')][0].querySelector('.ai-head .btn').click()`);
       await ui.waitFor(`document.querySelector('#page-title').textContent === 'Claude'`);
       await click('[data-route="home"]');
     });
 
-    await t.test('verso casa: indirizzi corretti, mappa A→B e indicazioni', async () => {
+    await t.test('commute: correct addresses, A→B map and directions', async () => {
       await ui.eval(`document.querySelector('.widget[data-widget="commute"]').scrollIntoView()`);
       await ui.eval(`const [a, b] = document.querySelectorAll('.route-form .suggest input'); a.focus(); a.value = 'Via tiepolo padova'; a.dispatchEvent(new Event('input', { bubbles: true }))`);
       await ui.waitFor(`!document.querySelector('.route-form .suggest .suggestions').hidden`, { timeout: 15000 });
@@ -242,57 +248,57 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       await ui.waitFor(`document.querySelectorAll('.widget[data-widget="commute"] .leaflet-marker-icon').length === 2`, { timeout: 20000 });
       const result = await ui.eval(`return { summary: document.querySelector('.route-summary').innerText, ends: document.querySelector('.route-ends').innerText, steps: document.querySelectorAll('.route-steps .step').length, path: document.querySelectorAll('.widget[data-widget="commute"] path.leaflet-interactive').length }`);
       assert.match(result.summary, /35\s*min/);
-      assert.match(result.summary, /37,8 km/);
+      assert.match(result.summary, /37\.8 km/);
       assert.match(result.ends, /A\s*Via Giovanni Battista Tiepolo, Padova/);
       assert.match(result.ends, /B\s*Corso Andrea Palladio 98, Vicenza/);
       assert.equal(result.steps, 4);
       assert.ok(result.path >= 2);
-      assert.match(await text('.route-steps'), /Svolta a destra in Via San Massimo/);
+      assert.match(await text('.route-steps'), /Turn right onto Via San Massimo/);
       const prefs = await ui.eval('return window.nuvia.getPreferences()');
       assert.equal(prefs.homeOriginPlace.label, 'Via Giovanni Battista Tiepolo, Padova');
       await ui.eval(`document.querySelectorAll('.route-form .segmented button')[1].click()`);
-      await ui.waitFor(`/bici/.test(document.querySelector('.widget[data-widget="commute"] .w-meta').innerText)`);
+      await ui.waitFor(`/bike/.test(document.querySelector('.widget[data-widget="commute"] .w-meta').innerText)`);
     });
 
-    await t.test('notifiche: pannello, cancellazione singola e totale', async () => {
-      await ui.eval(`await window.nuvia.addNotification({ title: 'Prova A', body: 'uno' }); await window.nuvia.addNotification({ title: 'Prova B', body: 'due' });`);
+    await t.test('notifications: panel, delete one and clear all', async () => {
+      await ui.eval(`await window.nuvia.addNotification({ title: 'Test A', body: 'one' }); await window.nuvia.addNotification({ title: 'Test B', body: 'two' });`);
       await ui.waitFor(`!document.querySelector('#open-notifications .dot-badge').hidden`);
       await click('#open-notifications');
       await ui.waitFor(`document.querySelector('.notif-panel[open] .notif')`);
       const before = await ui.eval(`return document.querySelectorAll('.notif-panel .notif').length`);
-      await ui.eval(`[...document.querySelectorAll('.notif-panel .notif')].find(n => n.innerText.includes('Prova A')).querySelector('.delete-notification').click()`);
-      await ui.waitFor(`document.querySelectorAll('.notif-panel .notif').length === ${before - 1} && !document.querySelector('.notif-panel').innerText.includes('Prova A')`);
+      await ui.eval(`[...document.querySelectorAll('.notif-panel .notif')].find(n => n.innerText.includes('Test A')).querySelector('.delete-notification').click()`);
+      await ui.waitFor(`document.querySelectorAll('.notif-panel .notif').length === ${before - 1} && !document.querySelector('.notif-panel').innerText.includes('Test A')`);
       await click('#clear-notifications');
       await ui.waitFor(`document.querySelectorAll('.notif-panel .notif').length === 0`);
       assert.equal((await ui.eval('return window.nuvia.listNotifications()')).length, 0);
       await ui.eval(`document.querySelector('.notif-panel').close()`);
-      await ui.waitFor(`document.querySelector('#open-notifications .dot-badge').hidden && /Nessuna notifica/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
-      await ui.eval(`await window.nuvia.addNotification({ title: 'Dal widget', body: 'x' })`);
-      await ui.waitFor(`/Dal widget/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
+      await ui.waitFor(`document.querySelector('#open-notifications .dot-badge').hidden && /No notifications/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
+      await ui.eval(`await window.nuvia.addNotification({ title: 'From the widget', body: 'x' })`);
+      await ui.waitFor(`/From the widget/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
       await ui.eval(`document.querySelector('.widget[data-widget="notifications"] .delete-notification').click()`);
-      await ui.waitFor(`!/Dal widget/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
+      await ui.waitFor(`!/From the widget/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
     });
 
-    await t.test('blocchi: opzioni, dimensioni, nascondi, personalizza e trascina', async () => {
+    await t.test('widgets: options, sizes, hide, customize and drag', async () => {
       await ui.eval(`document.querySelector('#page-home').scrollTop = 0; document.querySelector('.widget[data-widget="mail"] [data-act="settings"]').click()`);
       await ui.waitFor(`document.querySelector('dialog.popover[open]')`);
       await ui.eval(`[...document.querySelectorAll('dialog.popover .segmented')][0].querySelectorAll('button')[2].click()`);
       await ui.waitFor(`document.querySelector('.widget[data-widget="mail"]').dataset.size === 'l'`);
       await ui.eval(`[...document.querySelectorAll('dialog.popover .segmented')][1].querySelectorAll('button')[2].click()`);
       await ui.waitFor(`document.querySelector('.widget[data-widget="mail"]').dataset.height === 'tall'`);
-      await ui.eval(`[...document.querySelectorAll('dialog.popover .check')].find(c => c.innerText.includes('Solo email da leggere')).querySelector('.toggle').click()`);
+      await ui.eval(`[...document.querySelectorAll('dialog.popover .check')].find(c => c.innerText.includes('Unread only')).querySelector('.toggle').click()`);
       await ui.waitFor(`document.querySelectorAll('.widget[data-widget="mail"] .row').length === 3`);
-      await ui.eval(`[...document.querySelectorAll('dialog.popover button')].find(b => b.innerText.includes('Nascondi')).click()`);
+      await ui.eval(`[...document.querySelectorAll('dialog.popover button')].find(b => b.innerText.includes('Hide')).click()`);
       await ui.waitFor(`!document.querySelector('.widget[data-widget="mail"]')`);
       await click('#customize');
       await ui.waitFor(`document.querySelector('#customize-dialog[open]')`);
-      await ui.eval(`[...document.querySelectorAll('#customize-dialog .layout-row')].find(r => r.innerText.includes('Posta')).querySelector('.toggle').click()`);
+      await ui.eval(`[...document.querySelectorAll('#customize-dialog .layout-row')].find(r => r.innerText.includes('Mail')).querySelector('.toggle').click()`);
       await ui.waitFor(`document.querySelector('.widget[data-widget="mail"]')`);
-      await ui.eval(`[...document.querySelectorAll('#customize-dialog .layout-row')].find(r => r.innerText.includes('Calendario')).querySelector('[title="Su"]').click()`);
+      await ui.eval(`[...document.querySelectorAll('#customize-dialog .layout-row')].find(r => r.innerText.includes('Calendar')).querySelector('[title="Up"]').click()`);
       await ui.waitFor(`document.querySelector('.widget').dataset.widget === 'calendar'`);
       await ui.eval(`[...document.querySelectorAll('#customize-dialog .segmented')][0].querySelectorAll('button')[1].click()`);
       await ui.waitFor(`getComputedStyle(document.querySelector('#widget-grid')).getPropertyValue('--cols').trim() === '2'`);
-      await ui.eval(`[...document.querySelectorAll('#customize-dialog button')].find(b => b.innerText.includes('Ripristina')).click()`);
+      await ui.eval(`[...document.querySelectorAll('#customize-dialog button')].find(b => b.innerText.includes('Reset')).click()`);
       await ui.waitFor(`document.querySelector('.widget').dataset.widget === 'mail' && document.querySelector('.widget[data-widget="mail"]').dataset.size === 'm'`);
       await ui.eval(`document.querySelector('#customize-dialog').close()`);
       const order = await ui.eval(`
@@ -309,53 +315,53 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       assert.deepEqual(order.saved, ['weather', 'mail']);
       assert.equal(order.draggable, false);
       const scroll = await ui.eval(`const body = document.querySelector('.widget[data-widget="messages"] .w-body'); body.scrollTop = 0; body.scrollTop = 40; return { scrollable: body.scrollHeight > body.clientHeight, top: body.scrollTop }`);
-      if (scroll.scrollable) assert.ok(scroll.top > 0, 'il contenuto dei blocchi deve scorrere');
+      if (scroll.scrollable) assert.ok(scroll.top > 0, 'widget content must scroll');
     });
 
-    await t.test('servizi: aggiungi sopra un servizio aperto, modifica, crash e ricarica', async () => {
+    await t.test('services: add over an open service, edit, crash and reload', async () => {
       await click('.service[data-id="site"]');
       await ui.waitFor(`window.nuvia.debugState().then(s => s.activeKey === 'site' && s.attached)`);
       await click('#add-service');
       await ui.waitFor(`document.querySelector('#service-dialog[open]')`);
       const during = await debug();
-      assert.equal(during.attached, false, 'la vista del servizio deve lasciare spazio al popup');
+      assert.equal(during.attached, false, 'the service view must make room for the dialog');
       assert.equal(during.overlayDepth, 1);
-      assert.ok(await ui.eval(`return getComputedStyle(document.querySelector('#view-shot')).backgroundImage.startsWith('url(')`), 'screenshot del servizio sotto al popup');
+      assert.ok(await ui.eval(`return getComputedStyle(document.querySelector('#view-shot')).backgroundImage.startsWith('url(')`), 'service screenshot under the dialog');
       await ui.eval(`[...document.querySelectorAll('#service-dialog .preset')].find(p => p.innerText.includes('Notion')).click()`);
       assert.equal(await ui.eval(`return document.querySelector('#service-dialog input[type=url]').value`), 'https://www.notion.so/');
-      await ui.eval(`const [name, url] = document.querySelectorAll('#service-dialog input'); name.value = 'Secondo sito'; url.value = '${base}/site?2'; document.querySelector('#save-service').click()`);
-      await ui.waitFor(`document.querySelector('#page-title').textContent === 'Secondo sito' && !document.querySelector('#service-dialog')`);
-      assert.match(await text('#toasts'), /Aggiungine un altro/);
+      await ui.eval(`const [name, url] = document.querySelectorAll('#service-dialog input'); name.value = 'Second site'; url.value = '${base}/site?2'; document.querySelector('#save-service').click()`);
+      await ui.waitFor(`document.querySelector('#page-title').textContent === 'Second site' && !document.querySelector('#service-dialog')`);
+      assert.match(await text('#toasts'), /Add another/);
       const after = await debug();
       assert.equal(after.overlayDepth, 0);
       assert.equal(after.attached, true);
       const services = await ui.eval('return window.nuvia.listServices()');
-      const added = services.find(service => service.name === 'Secondo sito');
+      const added = services.find(service => service.name === 'Second site');
       assert.ok(added);
       await ui.eval(`window.__nuviaDebug.openEditService(${JSON.stringify(added.id)})`);
       await ui.waitFor(`document.querySelector('dialog.sheet[open] input')`);
-      await ui.eval(`const name = document.querySelector('dialog.sheet[open] input'); name.value = 'Sito rinominato'; [...document.querySelectorAll('dialog.sheet[open] button')].find(b => b.innerText === 'Salva').click()`);
-      await ui.waitFor(`[...document.querySelectorAll('.service .label')].some(el => el.textContent === 'Sito rinominato')`);
+      await ui.eval(`const name = document.querySelector('dialog.sheet[open] input'); name.value = 'Renamed site'; [...document.querySelectorAll('dialog.sheet[open] button')].find(b => b.innerText === 'Save').click()`);
+      await ui.waitFor(`[...document.querySelectorAll('.service .label')].some(el => el.textContent === 'Renamed site')`);
       await ui.eval(`window.__nuviaDebug.removeService(${JSON.stringify(added.id)})`);
       await ui.waitFor(`document.querySelector('dialog.sheet[open]')`);
-      await ui.eval(`[...document.querySelectorAll('dialog.sheet[open] button')].find(b => b.innerText === 'Rimuovi').click()`);
-      await ui.waitFor(`![...document.querySelectorAll('.service .label')].some(el => el.textContent === 'Sito rinominato') && document.querySelector('#page-title').textContent === 'Panoramica'`);
+      await ui.eval(`[...document.querySelectorAll('dialog.sheet[open] button')].find(b => b.innerText === 'Remove').click()`);
+      await ui.waitFor(`![...document.querySelectorAll('.service .label')].some(el => el.textContent === 'Renamed site') && document.querySelector('#page-title').textContent === 'Overview'`);
       // A service page that crashes shows a recovery screen instead of a blank view.
       await click('.service[data-id="site"]');
       await ui.waitFor(`window.nuvia.debugState().then(s => s.activeKey === 'site' && s.attached)`);
       const site = await app.page(target => target.url.startsWith(`${base}/site`) && !target.url.includes('?2'));
       site.send('Page.crash');
-      await ui.waitFor(`/si è fermato/.test(document.querySelector('#view-state').innerText)`, { timeout: 15000 });
+      await ui.waitFor(`/stopped/.test(document.querySelector('#view-state').innerText)`, { timeout: 15000 });
       assert.equal((await debug()).attached, false);
       await ui.eval(`document.querySelector('#view-state .btn').click()`);
       await ui.waitFor(`window.nuvia.debugState().then(s => s.activeKey === 'site' && s.attached)`, { timeout: 15000 });
       await ui.waitFor(`!document.querySelector('.service[data-id="site"]').classList.contains('crashed')`, { timeout: 15000 });
     });
 
-    await t.test('scorciatoie e ricerca rapida', async () => {
+    await t.test('shortcuts and quick switcher', async () => {
       const key = (k, extra = '') => ui.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: '${k}', ctrlKey: true, bubbles: true ${extra} }))`);
       await key('0');
-      await ui.waitFor(`document.querySelector('#page-title').textContent === 'Panoramica'`);
+      await ui.waitFor(`document.querySelector('#page-title').textContent === 'Overview'`);
       await key('2');
       await ui.waitFor(`document.querySelector('#page-title').textContent === 'WhatsApp'`);
       await key('k');
@@ -367,10 +373,10 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       await click('[data-route="home"]');
     });
 
-    await t.test('impostazioni: tema, accento, sfondo, nome, città, barra compatta', async () => {
+    await t.test('settings: theme, accent, background, name, city, compact sidebar', async () => {
       await click('#open-settings');
       await ui.waitFor(`document.querySelector('#settings-dialog[open]')`);
-      await ui.eval(`[...document.querySelectorAll('#settings-dialog .segmented button')].find(b => b.innerText.includes('Chiaro')).click()`);
+      await ui.eval(`[...document.querySelectorAll('#settings-dialog .segmented button')].find(b => b.innerText.includes('Light')).click()`);
       assert.equal(await ui.eval(`return document.documentElement.dataset.theme`), 'light');
       await ui.eval(`document.querySelector('#settings-dialog [data-accent="lime"]').click()`);
       assert.equal(await ui.eval(`return document.documentElement.dataset.accent`), 'lime');
@@ -391,24 +397,66 @@ test('Nuvia: ogni pagina, blocco e pulsante', { timeout: 420000 }, async t => {
       assert.equal(await ui.eval(`return document.body.classList.contains('sidebar-collapsed')`), false);
     });
 
-    await t.test('treni e finestra: preferiti e controlli', async () => {
-      await ui.eval(`const input = document.querySelector('#train-form input'); input.value = '16079'; document.querySelector('#train-form [title="Salva tra i preferiti"]').click()`);
-      await ui.waitFor(`/16079/.test(document.querySelector('.widget[data-widget="train"] .account-strip')?.innerText)`);
-      await sleep(400);
-      assert.deepEqual((await ui.eval('return window.nuvia.getPreferences()')).favoriteTrains, ['16079']);
+    await t.test('trains: built-in Ritardometro with board and imported config', async () => {
+      await ui.waitFor(`document.querySelectorAll('.widget[data-widget="train"] .train-board .row').length === 2`, { timeout: 20000 });
+      const board = await text('.widget[data-widget="train"] .train-board');
+      assert.match(board, /VERONA PORTA NUOVA/);
+      assert.match(board, /BRESCIA/);
+      assert.doesNotMatch(board, /FERRARA/, 'only the chosen destinations');
+      assert.match(board, /\+13/);
+      assert.equal(await ui.eval(`return document.querySelector('.train-board .row.watched time')?.textContent`), '17:40');
+      const prefs = await ui.eval('return window.nuvia.getPreferences()');
+      assert.deepEqual(prefs.trains, { station: 'PADOVA', destinations: ['BRESCIA', 'VERONA PORTA NUOVA'], times: ['16:40', '17:40'], leadTime: 20, maxDelay: 1, enabled: true });
+      await ui.eval(`document.querySelector('.widget[data-widget="train"] [title="Station and alerts"]').click()`);
+      await ui.waitFor(`document.querySelector('#settings-dialog[open] #train-destinations')`);
+      await ui.eval(`const d = document.querySelector('#train-destinations'); d.value = 'ferrara'; d.dispatchEvent(new Event('change'))`);
+      await ui.waitFor(`/FERRARA/.test(document.querySelector('.widget[data-widget="train"] .train-board')?.innerText) && !/BRESCIA/.test(document.querySelector('.widget[data-widget="train"] .train-board').innerText)`, { timeout: 15000 });
+      await ui.eval(`document.querySelector('#settings-dialog').close()`);
+    });
+
+    await t.test('IAS: sign in once, check in and out of a lab', async () => {
+      await ui.waitFor(`/Sign in to DEI Labs/.test(document.querySelector('.widget[data-widget="ias"]')?.innerText)`, { timeout: 30000 });
+      await ui.eval(`document.querySelector('.widget[data-widget="ias"] .btn.accent').click()`);
+      await ui.waitFor(`document.querySelector('#ias-login-dialog[open]')`);
+      await ui.eval(`const [e, p] = document.querySelectorAll('#ias-login-dialog input'); e.value = 'test@unipd.it'; p.value = 'sbagliata'; document.querySelector('#ias-login-dialog [type=submit]').click()`);
+      await ui.waitFor(`/failed/i.test(document.querySelector('#ias-login-dialog')?.innerText)`, { timeout: 30000 });
+      await ui.eval(`const p = document.querySelectorAll('#ias-login-dialog input')[1]; p.value = 'segreta'; document.querySelector('#ias-login-dialog [type=submit]').click()`);
+      await ui.waitFor(`!document.querySelector('#ias-login-dialog') && document.querySelector('#ias-lab')`, { timeout: 30000 });
+      assert.deepEqual(await ui.eval(`return [...document.querySelectorAll('#ias-lab option')].map(o => o.textContent)`), ['DEI/O | SSL Lab', 'DEI/O | Neurorobotics']);
+      await ui.eval(`const s = document.querySelector('#ias-lab'); s.value = 'DEI/O | Neurorobotics'; s.dispatchEvent(new Event('change')); document.querySelector('.widget[data-widget="ias"] .btn.accent').click()`);
+      await ui.waitFor(`/inside/.test(document.querySelector('.widget[data-widget="ias"]').innerText) && /Neurorobotics/.test(document.querySelector('.widget[data-widget="ias"]').innerText)`, { timeout: 30000 });
+      // The session is remembered: a fresh read needs no new login.
+      const again = await ui.eval('return window.nuvia.iasState()');
+      assert.equal(again.configured, true);
+      assert.equal(again.inside, true);
+      assert.equal(again.account, 'test@unipd.it');
+      await ui.eval(`[...document.querySelectorAll('.widget[data-widget="ias"] .btn')].find(b => b.innerText.includes('Leave')).click()`);
+      await ui.waitFor(`document.querySelector('#ias-lab')`, { timeout: 30000 });
+      const guardFree = await ui.eval(`return window.nuvia.debugState()`);
+      assert.equal(guardFree.uiExtensions, 0);
+    });
+
+    await t.test('window: controls', async () => {
       for (const id of ['window-min', 'window-max', 'window-close']) assert.ok(await ui.eval(`return Boolean(document.getElementById('${id}'))`));
       // Xvfb has no window manager, so only check that the control answers.
       await click('#window-max');
       assert.equal(typeof (await ui.eval('return window.nuvia.windowState()')).maximized, 'boolean');
     });
 
-    await t.test('nessun errore JavaScript nella UI', async () => {
+    await t.test('favourite trains', async () => {
+      await ui.eval(`document.querySelector('.widget[data-widget="train"]').scrollIntoView(); const input = document.querySelector('#train-form input'); input.value = '16079'; document.querySelector('#train-form [title="Save to favourites"]').click()`);
+      await ui.waitFor(`/16079/.test(document.querySelector('.widget[data-widget="train"] .account-strip')?.innerText)`);
+      await sleep(400);
+      assert.deepEqual((await ui.eval('return window.nuvia.getPreferences()')).favoriteTrains, ['16079']);
+    });
+
+    await t.test('no JavaScript errors in the UI', async () => {
       const errors = ui.logs.filter(entry => entry.type !== 'warning' && !/Failed to load resource|tile\.openstreetmap|net::ERR/.test(entry.text));
       assert.deepEqual(errors, []);
     });
   } catch (error) {
     if (ui) await ui.screenshot(join(app.profile, '..', 'nuvia-ui-failure.png')).catch(() => {});
-    throw new Error(`${error.message}\n--- log Electron ---\n${app.output().slice(-4000)}`);
+    throw new Error(`${error.message}\n--- Electron log ---\n${app.output().slice(-4000)}`);
   } finally {
     ui?.close();
     await app.close();

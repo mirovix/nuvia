@@ -11,7 +11,7 @@ import { launch, writeProfile, sleep } from './helpers.js';
 
 const STREAK = 'pnnfemgpilpdaojpnkjdgfgbnnjojfik';
 
-test('Nuvia con i servizi reali', { timeout: 600000 }, async t => {
+test('Nuvia with the real services', { timeout: 600000 }, async t => {
   const app = await launch({
     env: { CODEX_HOME: join(homedir(), '.codex'), CLAUDE_CONFIG_DIR: join(homedir(), '.claude') },
     prepare: profile => writeProfile(profile, {
@@ -27,7 +27,7 @@ test('Nuvia con i servizi reali', { timeout: 600000 }, async t => {
   try {
     ui = await app.ui();
 
-    await t.test('indirizzi: Via Tiepolo resta a Padova, Corso Palladio a Vicenza', async () => {
+    await t.test('addresses: Via Tiepolo stays in Padova, Corso Palladio in Vicenza', async () => {
       const origin = await ui.eval(`return window.nuvia.suggestPlaces('Via tiepolo padova', '')`);
       assert.match(origin[0].label, /Tiepolo, Padova$/, JSON.stringify(origin.slice(0, 3)));
       const route = await ui.eval(`return window.nuvia.route({ origin: 'Via tiepolo padova', destination: 'Corso Palladio 98', city: 'Vicenza', mode: 'car' })`);
@@ -36,14 +36,14 @@ test('Nuvia con i servizi reali', { timeout: 600000 }, async t => {
       assert.ok(route.minutes > 20 && route.minutes < 120, `${route.minutes} min`);
       assert.ok(route.kilometers > 25 && route.kilometers < 60, `${route.kilometers} km`);
       assert.ok(route.steps.length > 3 && route.geometry.length > 10);
-      assert.match(route.steps[0].text, /^Parti/);
+      assert.match(route.steps[0].text, /^Head out/);
       const bike = await ui.eval(`return window.nuvia.route({ originPlace: ${JSON.stringify(route.origin)}, destinationPlace: ${JSON.stringify(route.destination)}, mode: 'bike' })`);
-      assert.ok(bike.minutes > route.minutes, 'in bici si impiega di più');
+      assert.ok(bike.minutes > route.minutes, 'cycling takes longer');
       const station = await ui.eval(`return window.nuvia.route({ origin: 'Stazione di Padova', destination: 'Piazza Garibaldi', city: 'Padova' })`);
       assert.ok(station.kilometers < 5);
     });
 
-    await t.test('verso casa dalla panoramica: mappa con A e B', async () => {
+    await t.test('commute from the overview: map with A and B', async () => {
       await ui.eval(`
         const [a, b] = document.querySelectorAll('.route-form .suggest input');
         a.value = 'Via tiepolo padova'; a.dispatchEvent(new Event('input', { bubbles: true }));
@@ -54,25 +54,28 @@ test('Nuvia con i servizi reali', { timeout: 600000 }, async t => {
       assert.match(await ui.eval(`return document.querySelector('.route-ends').innerText`), /Vicenza/);
     });
 
-    await t.test('ViaggiaTreno e Ritardometro', async () => {
+    await t.test('ViaggiaTreno and Ritardometro', async () => {
       let train = null;
       for (const number of ['9626', '9624', '2090', '16079', '9412']) {
         try { train = await ui.eval(`return window.nuvia.trainStatus('${number}')`); break; } catch {}
       }
-      if (!train) return t.skip('nessuno dei treni di prova circola oggi');
+      if (!train) return t.skip('none of the sample trains runs today');
       assert.equal(typeof train.delay, 'number');
       assert.ok(train.destination);
       assert.ok(Array.isArray(train.stops));
-      const config = await ui.eval('return window.nuvia.ritardometroConfig()');
-      if (process.env.NUVIA_RITARDOMETRO) assert.equal(config.ok, true);
+      const imported = await ui.eval('return window.nuvia.trainImport()');
+      assert.ok(imported.station && imported.times.length, JSON.stringify(imported));
+      const board = await ui.eval(`return window.nuvia.trainBoard({ station: ${JSON.stringify(imported.station)}, destinations: [] })`);
+      assert.ok(Array.isArray(board) && board.length > 0, 'empty departures board');
+      assert.match(board[0].time, /^\d{2}:\d{2}$/);
     });
 
-    await t.test('meteo', async () => {
+    await t.test('weather', async () => {
       await ui.waitFor(`window.__nuviaDebug.state.weather && !window.__nuviaDebug.state.weather.error`, { timeout: 30000 });
-      assert.match(await ui.eval(`return document.querySelector('#weather-card').innerText`), /Padova/);
+      assert.match(await ui.eval(`return document.querySelector('#weather-card').innerText`), /Padova|Padua/);
     });
 
-    await t.test('Streak dal Chrome Web Store: solo su Gmail e Nuvia non si chiude', async () => {
+    await t.test('Streak from the Chrome Web Store: Gmail only and Nuvia stays up', async () => {
       const results = await ui.eval(`return window.nuvia.searchExtensions('streak crm for gmail')`);
       assert.ok(results.length > 0);
       const installed = await ui.eval(`return window.nuvia.installExtension('${STREAK}')`, { timeout: 180000 });
@@ -87,14 +90,14 @@ test('Nuvia con i servizi reali', { timeout: 600000 }, async t => {
       await ui.waitFor(`window.nuvia.debugState().then(s => s.activeKey === 'gmail' && s.attached)`, { timeout: 30000 });
       await sleep(15000);
       const state = await ui.eval('return window.nuvia.debugState()');
-      assert.equal(state.uiExtensions, 0, 'le estensioni non devono entrare nella UI di Nuvia');
+      assert.equal(state.uiExtensions, 0, "extensions must not enter Nuvia's UI");
       const live = await ui.eval('return window.nuvia.serviceState()');
       assert.notEqual(live.find(item => item.id === 'gmail')?.crashed, true);
-      assert.equal(await ui.eval('return 1 + 1'), 2, 'la UI risponde');
+      assert.equal(await ui.eval('return 1 + 1'), 2, 'the UI responds');
       await ui.eval(`document.querySelector('[data-route="home"]').click()`);
     });
 
-    await t.test('Spotify: player web con Widevine e senza user agent Electron', async () => {
+    await t.test('Spotify: web player with Widevine and no Electron user agent', async () => {
       await ui.eval(`window.nuvia.musicState()`);
       const spotify = await app.page(target => target.type === 'page' && /open\.spotify\.com/.test(target.url), 40000);
       await spotify.waitFor('document.body?.innerText?.length > 20', { timeout: 30000 });
@@ -106,11 +109,11 @@ test('Nuvia con i servizi reali', { timeout: 600000 }, async t => {
       assert.match(page.userAgent, /Chrome\/\d+/);
       assert.doesNotMatch(page.userAgent, /Electron/i);
       assert.equal(page.widevine, true);
-      assert.equal((await ui.eval('return window.nuvia.debugState()')).attached, false, 'Spotify gira in background');
+      assert.equal((await ui.eval('return window.nuvia.debugState()')).attached, false, 'Spotify runs in the background');
       assert.equal(typeof (await ui.eval('return window.nuvia.musicState()')).connected, 'boolean');
     });
 
-    await t.test('WhatsApp Web accetta il browser', async () => {
+    await t.test('WhatsApp Web accepts the browser', async () => {
       const whatsapp = await app.page(target => target.type === 'page' && /web\.whatsapp\.com/.test(target.url), 40000);
       await whatsapp.waitFor('document.body?.innerText?.length > 20', { timeout: 40000 });
       const page = await whatsapp.eval(`return { userAgent: navigator.userAgent, text: document.body.innerText.slice(0, 1500) }`);
@@ -121,30 +124,29 @@ test('Nuvia con i servizi reali', { timeout: 600000 }, async t => {
       assert.ok(Array.isArray(feed.items) && feed.sources.some(source => source.serviceId === 'wa'));
     });
 
-    await t.test('Claude & Codex dai log locali', async () => {
-      if (!existsSync(join(homedir(), '.codex')) && !existsSync(join(homedir(), '.claude'))) return t.skip('nessun log locale');
+    await t.test('Claude & Codex from local logs', async () => {
+      if (!existsSync(join(homedir(), '.codex')) && !existsSync(join(homedir(), '.claude'))) return t.skip('no local logs');
       const usage = await ui.eval('return window.nuvia.aiUsage({})', { timeout: 60000 });
       if (existsSync(join(homedir(), '.codex', 'sessions'))) assert.equal(typeof usage.codex.tokens.week, 'number');
       if (existsSync(join(homedir(), '.claude', 'projects'))) assert.equal(typeof usage.claude.tokens.week, 'number');
       assert.equal(usage.error, null);
     });
 
-    await t.test('laboratorio IAS', async () => {
-      const status = await ui.eval('return window.nuvia.iasStatus()');
-      if (!status.configured) return t.skip('DEI_USER/DEI_PASSWORD non impostate');
-      let labs = await ui.eval('return window.nuvia.iasLabs()', { timeout: 120000 });
-      if (!labs.labs?.length && !labs.alreadyInside) labs = await ui.eval('return window.nuvia.iasLabs()', { timeout: 120000 });
-      assert.ok(labs.alreadyInside || labs.labs.length > 0, JSON.stringify(labs));
+    await t.test('DEI Labs: native sign-in and lab list (no check-in recorded)', async () => {
+      if (!process.env.DEI_USER || !process.env.DEI_PASSWORD) return t.skip('DEI_USER/DEI_PASSWORD not set');
+      const state = await ui.eval('return window.nuvia.iasState()', { timeout: 90000 });
+      assert.equal(state.configured, true, JSON.stringify(state));
+      assert.ok(state.inside || state.labs.length > 0, JSON.stringify(state));
     });
 
-    await t.test('dopo tutto questo la UI è ancora sana', async () => {
+    await t.test('after all this the UI is still healthy', async () => {
       const errors = ui.logs.filter(entry => entry.type === 'exception');
       assert.deepEqual(errors, []);
       await ui.eval(`document.querySelector('[data-route="messages"]').click()`);
       await ui.waitFor(`!document.querySelector('#page-messages').hidden`);
     });
   } catch (error) {
-    throw new Error(`${error.message}\n--- log Electron ---\n${app.output().slice(-4000)}`);
+    throw new Error(`${error.message}\n--- Electron log ---\n${app.output().slice(-4000)}`);
   } finally {
     ui?.close();
     await app.close();

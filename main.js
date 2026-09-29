@@ -1,8 +1,7 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components, safeStorage } from 'electron';
 import { join, extname, resolve, sep, dirname } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { spawn } from 'node:child_process';
 import { homedir, userInfo } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import yauzl from 'yauzl';
@@ -23,13 +22,12 @@ const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 const CLAUDE_HOME = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 const IS_MAC = process.platform === 'darwin';
 const IS_WINDOWS = process.platform === 'win32';
-// Optional local integrations, configured in Settings → Integrations (or via env).
+// Optional local sources for the built-in integrations.
 function integrations() {
   const saved = readJson(paths.preferences(), {}).integrations || {};
   return {
-    iasProject: saved.iasProject || process.env.NUVIA_IAS_PROJECT || '',
-    ritardometroProject: saved.ritardometroProject || process.env.NUVIA_RITARDOMETRO || '',
-    python: saved.python || process.env.NUVIA_PYTHON || (IS_WINDOWS ? 'python' : 'python3')
+    // Legacy: a local checkout of the Ritardometro, used only to import its config.
+    ritardometroProject: saved.ritardometroProject || process.env.NUVIA_RITARDOMETRO || ''
   };
 }
 
@@ -68,7 +66,7 @@ const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const withTimeout = (promise, ms, fallback) => Promise.race([promise, sleep(ms).then(() => fallback)]);
 
 const defaultName = () => { const name = userInfo().username || ''; return name ? name[0].toUpperCase() + name.slice(1) : ''; };
-function preferences() { return { theme: 'dark', accent: 'coral', background: 'plain', city: 'Roma', name: defaultName(), ...readJson(paths.preferences(), {}) }; }
+function preferences() { return { theme: 'dark', accent: 'blue', background: 'plain', city: 'Roma', name: defaultName(), ...readJson(paths.preferences(), {}) }; }
 function savePreferences(value) { writeJson(paths.preferences(), value); return value; }
 
 let mainWindow;
@@ -283,7 +281,7 @@ function quarantine(serviceId, ids, reason) {
   for (const id of ids) { rules[id] ||= {}; rules[id][serviceId] = false; }
   writeJson(paths.rules(), rules);
   const names = ids.map(id => readInfo(extensionDirs().find(dir => extensionIdOf(dir) === id) || '')?.name || id).join(', ');
-  addNotification({ title: 'Estensione disattivata', body: `${names} ${reason} su ${service?.name || 'un servizio'}. La puoi riattivare da Estensioni.`, type: 'warning' });
+  addNotification({ title: 'Extension disabled', body: `${names} ${reason} on ${service?.name || 'a service'}. You can turn it back on in Extensions.`, type: 'warning' });
 }
 
 function recoverFromCrash() {
@@ -292,9 +290,9 @@ function recoverFromCrash() {
   if (guard.running) {
     crashes = (guard.crashes || 0) + 1;
     const pending = Object.entries(guard.pending || {}).filter(([, ids]) => ids.length);
-    for (const [serviceId, ids] of pending) quarantine(serviceId, ids, 'ha interrotto Nuvia durante il caricamento');
+    for (const [serviceId, ids] of pending) quarantine(serviceId, ids, 'crashed Nuvia while loading');
     if (!pending.length && crashes >= 2) {
-      for (const [serviceId, ids] of Object.entries(guard.loaded || {})) quarantine(serviceId, ids, 'era attiva durante due chiusure improvvise');
+      for (const [serviceId, ids] of Object.entries(guard.loaded || {})) quarantine(serviceId, ids, 'was active during two unexpected shutdowns');
       crashes = 0;
     }
     if (pending.length) crashes = 0;
@@ -310,7 +308,7 @@ function extensionCrashed(service) {
   const recent = (crashLog.get(service.id) || []).filter(at => Date.now() - at < 120000);
   recent.push(Date.now()); crashLog.set(service.id, recent);
   if (recent.length < 2) return;
-  quarantine(service.id, loaded, 'ha fatto chiudere la pagina più volte');
+  quarantine(service.id, loaded, 'made the page crash repeatedly');
   for (const extension of serviceSession.extensions.getAllExtensions()) serviceSession.extensions.removeExtension(extension.id);
   crashLog.delete(service.id);
 }
@@ -348,12 +346,12 @@ function decodeHtml(text = '') { return text.replace(/&amp;/g, '&').replace(/&#3
 async function searchMarketplace(query) {
   // Node's fetch on purpose: Chromium's stack gets Google's EU consent page instead of results.
   const response = await fetch(`https://chromewebstore.google.com/search/${encodeURIComponent(query)}`, { headers: { 'user-agent': 'Mozilla/5.0' } });
-  if (!response.ok) throw new Error(`Chrome Web Store non disponibile (${response.status})`);
+  if (!response.ok) throw new Error(`Chrome Web Store unavailable (${response.status})`);
   const html = await response.text();
   const starts = [...html.matchAll(/data-item-id="([a-p]{32})"/g)];
   return starts.slice(0, 16).map((match, index) => {
     const block = html.slice(match.index, starts[index + 1]?.index ?? match.index + 7000);
-    const name = block.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1] || 'Estensione Chrome';
+    const name = block.match(/<h2[^>]*>([^<]+)<\/h2>/)?.[1] || 'Chrome extension';
     const image = block.match(/<img[^>]+src="([^"]+)"/)?.[1] || '';
     const href = block.match(/href="\.\/detail\/([^"]+)"/)?.[1] || match[1];
     return { id: match[1], name: decodeHtml(name), image: decodeHtml(image), url: `https://chromewebstore.google.com/detail/${href}`, installed: extensionDirs().some(dir => extensionIdOf(dir) === match[1]) };
@@ -369,7 +367,7 @@ async function fetchWithRetry(url, options = {}, attempts = 3) {
     } catch (error) { lastError = error; }
     await sleep(400 * (attempt + 1));
   }
-  throw new Error(`Connessione al Chrome Web Store non riuscita: ${lastError?.message || 'rete non disponibile'}`);
+  throw new Error(`Could not connect to the Chrome Web Store: ${lastError?.message || 'network unavailable'}`);
 }
 function extractZipSafely(zipPath, destination) {
   return new Promise((resolveDone, reject) => {
@@ -381,7 +379,7 @@ function extractZipSafely(zipPath, destination) {
       zip.on('entry', entry => {
         const target = resolve(destination, entry.fileName);
         const mode = (entry.externalFileAttributes >>> 16) & 0o170000;
-        if (!`${target}${entry.fileName.endsWith('/') ? sep : ''}`.startsWith(root) || mode === 0o120000) return fail(new Error('Archivio estensione non sicuro'));
+        if (!`${target}${entry.fileName.endsWith('/') ? sep : ''}`.startsWith(root) || mode === 0o120000) return fail(new Error('Unsafe extension archive'));
         if (entry.fileName.endsWith('/')) { mkdirSync(target, { recursive: true }); zip.readEntry(); return; }
         mkdirSync(dirname(target), { recursive: true });
         zip.openReadStream(entry, (streamError, input) => {
@@ -395,15 +393,15 @@ function extractZipSafely(zipPath, destination) {
   });
 }
 async function installMarketplaceExtension(id) {
-  if (!/^[a-p]{32}$/.test(id)) throw new Error('ID estensione non valido');
+  if (!/^[a-p]{32}$/.test(id)) throw new Error('Invalid extension ID');
   const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${process.versions.chrome.split('.')[0]}.0&acceptformat=crx2,crx3&x=id%3D${id}%26installsource%3Dondemand%26uc`;
   const crx = Buffer.from(await (await fetchWithRetry(url, { headers: { 'user-agent': userAgent() } })).arrayBuffer());
-  if (crx.subarray(0, 4).toString() !== 'Cr24') throw new Error('Il Web Store non ha restituito un pacchetto CRX');
+  if (crx.subarray(0, 4).toString() !== 'Cr24') throw new Error('The Web Store did not return a CRX package');
   const version = crx.readUInt32LE(4);
   let offset;
   if (version === 3) offset = 12 + crx.readUInt32LE(8);
   else if (version === 2) offset = 16 + crx.readUInt32LE(8) + crx.readUInt32LE(12);
-  else throw new Error(`Formato CRX ${version} non supportato`);
+  else throw new Error(`Unsupported CRX format ${version}`);
   const root = paths.extensionRoot(); const dir = join(root, id); const zip = join(root, `${id}.zip`);
   mkdirSync(root, { recursive: true });
   // Unload the old copy everywhere before replacing its files.
@@ -415,7 +413,7 @@ async function installMarketplaceExtension(id) {
   writeFileSync(zip, crx.subarray(offset));
   try { await extractZipSafely(zip, dir); } finally { rmSync(zip, { force: true }); }
   const info = readInfo(dir);
-  if (!info) { rmSync(dir, { recursive: true, force: true }); throw new Error('Pacchetto senza manifest valido'); }
+  if (!info) { rmSync(dir, { recursive: true, force: true }); throw new Error('Package has no valid manifest'); }
   writeJson(paths.extensions(), [...new Set([...readJson(paths.extensions(), []), dir])]);
   const rules = readJson(paths.rules(), {});
   rules[id] = { ...defaultRules(info, services()), ...(rules[id] || {}) };
@@ -565,20 +563,20 @@ handle('services:context-menu', id => {
   const service = serviceById(id); if (!service) return;
   const contents = views.get(id)?.webContents;
   Menu.buildFromTemplate([
-    { label: 'Apri', click: () => notifyRenderer('open-service', id) },
-    { label: 'Ricarica', enabled: Boolean(contents), click: () => contents?.reload() },
-    { label: contents?.isAudioMuted() ? 'Riattiva audio' : 'Silenzia', enabled: Boolean(contents), click: () => contents?.setAudioMuted(!contents.isAudioMuted()) },
-    { label: 'Apri nel browser', click: () => shell.openExternal(contents?.getURL() || service.url) },
+    { label: 'Open', click: () => notifyRenderer('open-service', id) },
+    { label: 'Reload', enabled: Boolean(contents), click: () => contents?.reload() },
+    { label: contents?.isAudioMuted() ? 'Unmute' : 'Mute', enabled: Boolean(contents), click: () => contents?.setAudioMuted(!contents.isAudioMuted()) },
+    { label: 'Open in browser', click: () => shell.openExternal(contents?.getURL() || service.url) },
     { type: 'separator' },
-    { label: 'Modifica…', click: () => notifyRenderer('service:edit', id) },
-    { label: 'Rimuovi', click: () => notifyRenderer('service:remove', id) }
+    { label: 'Edit…', click: () => notifyRenderer('service:edit', id) },
+    { label: 'Remove', click: () => notifyRenderer('service:remove', id) }
   ]).popup({ window: mainWindow });
 });
 
 handle('preferences:get', () => preferences());
 handle('preferences:save', value => savePreferences(value));
 handle('preferences:background-file', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, { title: 'Scegli uno sfondo', properties: ['openFile'], filters: [{ name: 'Immagini', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+  const result = await dialog.showOpenDialog(mainWindow, { title: 'Choose a background', properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
   if (result.canceled) return null;
   const destination = fileInProfile(`background-${Date.now()}${extname(result.filePaths[0]).toLowerCase() || '.jpg'}`);
   copyFileSync(result.filePaths[0], destination);
@@ -594,7 +592,7 @@ handle('extensions:install', id => installMarketplaceExtension(String(id)));
 handle('extensions:toggle', async (marketplaceId, serviceId, enabled) => {
   const rules = readJson(paths.rules(), {}); rules[marketplaceId] ||= {}; rules[marketplaceId][serviceId] = Boolean(enabled); writeJson(paths.rules(), rules);
   const dir = extensionDirs().find(path => extensionIdOf(path) === marketplaceId);
-  if (!dir) throw new Error('Estensione non trovata');
+  if (!dir) throw new Error('Extension not found');
   if (!sessionsPrepared.has(serviceId)) return rulesFor(dir);
   const target = session.fromPartition(partitionFor(serviceId));
   const loaded = target.extensions.getAllExtensions().find(extension => extension.path === dir);
@@ -672,11 +670,11 @@ async function scrapeMessages(service) {
   const base = { serviceId: service.id, service: service.name, kind };
   if (kind === 'mattermost') {
     const data = await run(view.webContents, script(pageScripts.mattermostFeed), 15000, null);
-    if (!data) return { source: { ...base, ok: false, message: 'In caricamento' }, items: [] };
+    if (!data) return { source: { ...base, ok: false, message: 'Loading' }, items: [] };
     return { source: { ...base, ok: !data.loggedOut, loggedOut: data.loggedOut }, items: data.items.map(item => ({ ...base, ...item, id: `${service.id}:${item.channelId}`, time: '' })) };
   }
   const data = await run(view.webContents, script(pageScripts.chatList, kind), 6000, null);
-  if (!data) return { source: { ...base, ok: false, message: 'In caricamento' }, items: [] };
+  if (!data) return { source: { ...base, ok: false, message: 'Loading' }, items: [] };
   const items = data.items.map(row => ({ ...parseChatRow(row.lines), avatar: row.avatar, domUnread: row.unread })).filter(item => item.chat)
     .map(item => ({ ...base, id: `${service.id}:${item.chat}`, chat: item.chat, preview: item.preview, time: item.time, unread: item.domUnread || item.unread, avatar: item.avatar }));
   return { source: { ...base, ok: !data.loggedOut, loggedOut: data.loggedOut }, items };
@@ -697,14 +695,14 @@ handle('messages:open', async (serviceId, item) => {
 });
 handle('messages:send', async (serviceId, item, text) => {
   const service = serviceById(serviceId); const message = String(text || '').trim();
-  if (!service || !message) return { ok: false, message: 'Messaggio vuoto' };
+  if (!service || !message) return { ok: false, message: 'Empty message' };
   const kind = serviceKind(service);
   const view = await createServiceView(service);
-  if (kind === 'mattermost') return run(view.webContents, script(pageScripts.mattermostSend, item.channelId, message), 10000, { ok: false, message: 'Mattermost non risponde' });
+  if (kind === 'mattermost') return run(view.webContents, script(pageScripts.mattermostSend, item.channelId, message), 10000, { ok: false, message: 'Mattermost is not responding' });
   const opened = await run(view.webContents, script(pageScripts.openChat, kind, item.chat), 4000, false);
-  if (!opened) return { ok: false, message: 'Chat non trovata nell’elenco' };
+  if (!opened) return { ok: false, message: 'Chat not found in the list' };
   await sleep(1200);
-  return run(view.webContents, script(pageScripts.sendInOpenChat, kind, item.chat, message), 6000, { ok: false, message: 'Il servizio non risponde' });
+  return run(view.webContents, script(pageScripts.sendInOpenChat, kind, item.chat, message), 6000, { ok: false, message: 'The service is not responding' });
 });
 
 // ---------------------------------------------------------------------------
@@ -753,16 +751,16 @@ async function googleCalendarEvents(service, from, to) {
   }
   // Fallback: read the agenda page itself.
   const data = await withHiddenPage(service.id, `https://calendar.google.com/calendar/u/${account}/r/agenda`, contents => run(contents, script(pageScripts.agendaText), 8000, null), { settle: 3500 });
-  if (!data) return { ok: false, events: [], message: 'Calendario non raggiungibile' };
-  if (/accounts\.google\.com/.test(data.url)) return { ok: false, events: [], loggedOut: true, message: 'Accedi a Google Calendar' };
+  if (!data) return { ok: false, events: [], message: 'Calendar unreachable' };
+  if (/accounts\.google\.com/.test(data.url)) return { ok: false, events: [], loggedOut: true, message: 'Sign in to Google Calendar' };
   return { ok: true, method: 'page', events: data.items.map(text => parseAgendaText(text)).filter(event => event.end > from && event.start < to) };
 }
 
 async function outlookCalendarEvents(service, from, to) {
   const base = /outlook\.office/.test(service.url) ? 'https://outlook.office.com/calendar/view/week' : 'https://outlook.live.com/calendar/0/view/week';
   const data = await withHiddenPage(service.id, base, contents => run(contents, script(pageScripts.agendaText), 8000, null), { settle: 5000 });
-  if (!data) return { ok: false, events: [], message: 'Calendario non raggiungibile' };
-  if (/login\./.test(data.url)) return { ok: false, events: [], loggedOut: true, message: 'Accedi a Outlook' };
+  if (!data) return { ok: false, events: [], message: 'Calendar unreachable' };
+  if (/login\./.test(data.url)) return { ok: false, events: [], loggedOut: true, message: 'Sign in to Outlook' };
   return { ok: true, method: 'page', events: data.items.map(text => parseAgendaText(text)).filter(event => event.dated && event.end > from && event.start < to) };
 }
 
@@ -859,7 +857,7 @@ async function locateByIp() {
   for (const provider of ['https://ipwho.is/', 'https://ipapi.co/json/']) {
     try {
       const ip = await (await withTimeout(net.fetch(provider), 5000, null))?.json();
-      if (Number.isFinite(Number(ip?.latitude))) return { latitude: Number(ip.latitude), longitude: Number(ip.longitude), label: `${ip.city || 'Posizione attuale'} (approssimativa)`, approximate: true };
+      if (Number.isFinite(Number(ip?.latitude))) return { latitude: Number(ip.latitude), longitude: Number(ip.longitude), label: `${ip.city || 'Current location'} (approximate)`, approximate: true };
     } catch {}
   }
   return null;
@@ -872,18 +870,18 @@ handle('commute:route', async ({ origin, destination, city, mode = 'car', coordi
   let originChoices = [];
   if (!start && origin) {
     originChoices = await geocode(origin, geocodeOptions);
-    if (!originChoices.length) throw new Error(`Partenza non trovata: “${origin}”`);
+    if (!originChoices.length) throw new Error(`Starting point not found: “${origin}”`);
     start = originChoices[0];
   }
-  if (!start && Number.isFinite(Number(coordinates?.latitude))) start = { latitude: Number(coordinates.latitude), longitude: Number(coordinates.longitude), label: 'Posizione attuale' };
+  if (!start && Number.isFinite(Number(coordinates?.latitude))) start = { latitude: Number(coordinates.latitude), longitude: Number(coordinates.longitude), label: 'Current location' };
   if (!start) start = await locateByIp();
-  if (!start) throw new Error('Posizione attuale non disponibile: scrivi da dove parti');
+  if (!start) throw new Error('Current location unavailable: enter a starting point');
   let end = destinationPlace || null;
   let destinationChoices = [];
   if (!end) {
-    if (!String(destination || '').trim()) throw new Error('Scrivi la destinazione');
+    if (!String(destination || '').trim()) throw new Error('Enter a destination');
     destinationChoices = await geocode(destination, { ...geocodeOptions, cityHint: city || '' });
-    if (!destinationChoices.length) throw new Error(`Destinazione non trovata: “${[destination, city].filter(Boolean).join(', ')}”`);
+    if (!destinationChoices.length) throw new Error(`Destination not found: “${[destination, city].filter(Boolean).join(', ')}”`);
     end = destinationChoices[0];
   }
   const profile = MODES[mode] ? mode : 'car';
@@ -892,67 +890,216 @@ handle('commute:route', async ({ origin, destination, city, mode = 'car', coordi
   if (!summary && profile === 'car') {
     try { summary = summarizeRoute(await (await net.fetch(`https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson&steps=true`)).json()); } catch {}
   }
-  if (!summary) throw new Error('Percorso non disponibile in questo momento');
+  if (!summary) throw new Error('Route unavailable right now');
   return { ...summary, mode: profile, origin: start, destination: end, originChoices: originChoices.slice(0, 4), destinationChoices: destinationChoices.slice(0, 4), arrival: Date.now() + summary.minutes * 60000 };
 });
 
 // ---------------------------------------------------------------------------
 // IPC: trains, IAS, notifications, usage
 
+const VIAGGIATRENO = process.env.NUVIA_VIAGGIATRENO_URL || 'http://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno';
+
 handle('trains:status', async number => {
   const clean = String(number).replace(/\D/g, '');
-  if (!clean) throw new Error('Inserisci il numero del treno');
-  const base = 'http://www.viaggiatreno.it/infomobilita/resteasy/viaggiatreno';
-  const auto = await (await net.fetch(`${base}/cercaNumeroTrenoTrenoAutocomplete/${clean}`)).text();
+  if (!clean) throw new Error('Enter the train number');
+  const auto = await (await net.fetch(`${VIAGGIATRENO}/cercaNumeroTrenoTrenoAutocomplete/${clean}`)).text();
   const token = auto.split('\n').find(line => line.includes('|'))?.split('|')[1]?.trim();
-  if (!token) throw new Error('Treno non trovato');
+  if (!token) throw new Error('Train not found');
   const [, originCode, departureTime] = token.split('-');
-  const data = await (await net.fetch(`${base}/andamentoTreno/${originCode}/${clean}/${departureTime}`)).json();
+  const data = await (await net.fetch(`${VIAGGIATRENO}/andamentoTreno/${originCode}/${clean}/${departureTime}`)).json();
   const stops = (data.fermate || []).map(stop => ({ station: stop.stazione, planned: stop.programmata || stop.partenza_teorica || stop.arrivo_teorico || null, actual: stop.effettiva || stop.partenzaReale || stop.arrivoReale || null, delay: stop.ritardo ?? 0, passed: Boolean(stop.partenzaReale || stop.arrivoReale) }));
   return { number: (data.compNumeroTreno || clean).trim(), delay: data.ritardo ?? 0, station: data.stazioneUltimoRilevamento || data.origine, origin: data.origine, destination: data.destinazione, departed: data.partito ?? null, lastSeen: data.oraUltimoRilevamento || null, stops };
 });
-handle('ritardometro:config', () => {
-  try {
-    const { ritardometroProject } = integrations();
-    if (!ritardometroProject) return { ok: false, configured: false, station: '', destinations: [], maxDelay: 0 };
-    const source = readFileSync(join(ritardometroProject, 'config.yaml'), 'utf8');
-    const station = source.match(/^current_station:\s*(.+)$/m)?.[1]?.trim() || '';
-    const block = source.match(/destinations:\s*\n((?:\s+-\s+.*\n?)+)/)?.[1] || '';
-    return { ok: true, station, destinations: [...block.matchAll(/-\s+(.+)/g)].map(match => match[1].trim()), maxDelay: Number(source.match(/^max_delay_minutes:\s*(\d+)/m)?.[1] || 0) };
-  } catch { return { ok: false, station: '', destinations: [], maxDelay: 0 }; }
-});
 
-function runCommand(command, args, options = {}, timeout = 90000) {
-  return new Promise(resolveCommand => {
-    const child = spawn(command, args, { ...options, env: process.env }); let output = ''; let settled = false; let timer;
-    const finish = result => { if (settled) return; settled = true; clearTimeout(timer); resolveCommand(result); };
-    child.stdout?.on('data', chunk => { output += chunk; }); child.stderr?.on('data', chunk => { output += chunk; });
-    child.on('error', error => finish({ code: -1, output: error.message })); child.on('close', code => finish({ code, output }));
-    timer = setTimeout(() => { child.kill('SIGTERM'); finish({ code: -1, output: 'Timeout' }); }, timeout);
+// Ritardometro, built in: departures board from ViaggiaTreno plus the same
+// schedule as github.com/mirovix/ritardometro (times, lead time, max delay).
+const stationCodes = new Map();
+async function stationCode(name) {
+  const key = String(name || '').trim().toUpperCase();
+  if (!key) throw new Error('Station not set');
+  if (stationCodes.has(key)) return stationCodes.get(key);
+  const text = await (await net.fetch(`${VIAGGIATRENO}/autocompletaStazione/${encodeURIComponent(key)}`)).text();
+  const rows = text.split('\n').map(line => line.trim().split('|')).filter(row => row.length === 2);
+  const match = rows.find(([label]) => label.toUpperCase() === key) || rows[0];
+  if (!match) throw new Error(`Station not found: ${name}`);
+  stationCodes.set(key, match[1]);
+  return match[1];
+}
+async function departures(station, destinations = []) {
+  const code = await stationCode(station);
+  const when = encodeURIComponent(new Date().toString().replace(/ \(.*\)$/, ''));
+  const list = await (await net.fetch(`${VIAGGIATRENO}/partenze/${code}/${when}`)).json();
+  const wanted = destinations.map(item => String(item).trim().toUpperCase()).filter(Boolean);
+  return list.map(train => ({
+    number: String(train.compNumeroTreno || train.numeroTreno || '').trim(),
+    destination: String(train.destinazione || '').toUpperCase(),
+    time: train.compOrarioPartenza || '',
+    delay: Number(train.ritardo || 0),
+    platform: train.binarioEffettivoPartenzaDescrizione || train.binarioProgrammatoPartenzaDescrizione || '',
+    cancelled: Boolean(train.provvedimento === 1 || /soppress/i.test(train.subTitle || ''))
+  })).filter(train => !wanted.length || wanted.some(destination => train.destination.includes(destination)));
+}
+function parseRitardometro(source) {
+  const list = key => [...(source.match(new RegExp(`^${key}:\\s*\\n((?:\\s+-\\s+.*\\n?)+)`, 'm'))?.[1] || '').matchAll(/-\s+"?([^"\n]+)"?/g)].map(match => match[1].trim());
+  const hours = list('hours'); const minutes = list('minutes');
+  const times = hours.flatMap(hour => (minutes.length ? minutes : ['00']).map(minute => `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`));
+  return {
+    station: source.match(/^current_station:\s*(.+)$/m)?.[1]?.trim() || '',
+    destinations: list('destinations'),
+    times,
+    leadTime: Number(source.match(/^lead_time:\s*(\d+)/m)?.[1] || 20),
+    maxDelay: Number(source.match(/^max_delay_minutes:\s*(\d+)/m)?.[1] || 0)
+  };
+}
+handle('trains:board', ({ station, destinations } = {}) => departures(station, destinations || []));
+// First run: take the configuration from the Ritardometro repository.
+handle('trains:import', async () => {
+  const local = integrations().ritardometroProject;
+  if (local && existsSync(join(local, 'config.yaml'))) return { ...parseRitardometro(readFileSync(join(local, 'config.yaml'), 'utf8')), source: local };
+  const url = process.env.NUVIA_RITARDOMETRO_CONFIG || 'https://raw.githubusercontent.com/mirovix/ritardometro/main/config.yaml';
+  const response = await net.fetch(url);
+  if (!response.ok) throw new Error(`Ritardometro configuration unavailable (${response.status})`);
+  return { ...parseRitardometro(await response.text()), source: url };
+});
+const trainChecks = new Set();
+async function ritardometroTick() {
+  const config = readJson(paths.preferences(), {}).trains;
+  if (!config?.station || !config.times?.length || config.enabled === false) return;
+  const now = new Date();
+  for (const time of config.times) {
+    const [hour, minute] = time.split(':').map(Number);
+    const departure = new Date(now); departure.setHours(hour, minute, 0, 0);
+    const activation = departure.getTime() - (config.leadTime ?? 20) * 60000;
+    const key = `${now.toDateString()} ${time}`;
+    if (trainChecks.has(key) || now < activation || now > departure) continue;
+    trainChecks.add(key);
+    try {
+      const late = (await departures(config.station, config.destinations)).filter(train => train.time === time && (train.cancelled || train.delay > (config.maxDelay ?? 0)));
+      for (const train of late) addNotification({ title: `${train.number} → ${train.destination}`, body: train.cancelled ? `The ${train.time} train is cancelled` : `Departs ${train.time} from ${config.station}: +${train.delay} min${train.platform ? ` · platform ${train.platform}` : ''}`, type: 'train' });
+    } catch (error) { log('ritardometro', error.message); }
+  }
+}
+setInterval(ritardometroTick, 60000);
+
+// DEI Labs (IAS): the same steps as github.com/mirovix/log_ias_lab, done in a
+// hidden page of a dedicated persistent session instead of Selenium. The
+// session cookie is kept; credentials are asked once and stored encrypted
+// with the OS keychain (safeStorage), used only to renew an expired session.
+const IAS = { base: 'https://deilabs.dei.unipd.it', partition: 'persist:nuvia-ias', file: () => fileInProfile('ias-account.bin') };
+function iasCredentials() {
+  try {
+    if (existsSync(IAS.file())) return JSON.parse(safeStorage.decryptString(readFileSync(IAS.file())));
+  } catch (error) { log('ias credentials', error.message); }
+  if (process.env.DEI_USER && process.env.DEI_PASSWORD) return { email: process.env.DEI_USER, password: process.env.DEI_PASSWORD, fromEnv: true };
+  return null;
+}
+function iasSession() {
+  const iasSessionObject = session.fromPartition(IAS.partition);
+  if (!sessionsPrepared.has('ias')) {
+    sessionsPrepared.add('ias');
+    iasSessionObject.setUserAgent(userAgent());
+    if (TEST && process.env.NUVIA_FIXTURES) serveFixtures(iasSessionObject);
+  }
+  return iasSessionObject;
+}
+function iasPageScript(action, value) {
+  return `(() => {
+    const action = ${JSON.stringify(action)}; const value = ${JSON.stringify(value ?? null)};
+    const exit = document.querySelector("input[type='submit'][value^='Exit from']");
+    const select = document.getElementById('laboratory_id');
+    if (action === 'login') {
+      const set = (el, v) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v); el.dispatchEvent(new Event('input', { bubbles: true })); };
+      const email = document.querySelector("input[name='email']"); const password = document.querySelector("input[name='password']");
+      if (!email || !password) return { ok: false };
+      set(email, value.email); set(password, value.password);
+      const button = document.querySelector('button.btn.btn-primary') || document.querySelector("button[type='submit'], input[type='submit']");
+      if (button) button.click(); else email.form?.submit();
+      return { ok: true };
+    }
+    if (action === 'enter') {
+      const option = [...(select?.options || [])].find(item => item.text.trim() === value);
+      const enter = document.querySelector("input[type='submit'][value='Enter']");
+      if (!option || !enter) return { ok: false };
+      select.value = option.value; select.dispatchEvent(new Event('change', { bubbles: true })); enter.click();
+      return { ok: true };
+    }
+    if (action === 'exit') { if (!exit) return { ok: false }; exit.click(); return { ok: true }; }
+    return {
+      url: location.href,
+      login: Boolean(document.querySelector("input[name='password']")),
+      inside: Boolean(exit),
+      ready: Boolean(exit || select),
+      currentLab: exit ? exit.value.replace(/^Exit from\\s*/, '').trim() : '',
+      labs: [...(select?.options || [])].filter(item => item.value).map(item => item.text.trim())
+    };
+  })()`;
+}
+async function withIasPage(task) {
+  iasSession();
+  const window = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { partition: IAS.partition, sandbox: true, contextIsolation: true } });
+  window.webContents.setUserAgent(userAgent());
+  const contents = window.webContents;
+  const load = async url => { await withTimeout(contents.loadURL(url).catch(() => {}), 20000); await waitForLoad(contents, 15000); };
+  const read = () => run(contents, iasPageScript('read'), 8000, { login: false, labs: [] });
+  const settle = async ms => { await sleep(300); await waitForLoad(contents, ms); await sleep(400); };
+  try { return await task({ contents, load, read, settle }); } finally { if (!window.isDestroyed()) window.destroy(); }
+}
+// Opens the lab page, logging in first if the saved session has expired.
+// Without a session deilabs shows a "Session expired" page (no redirect), so
+// "logged in" means the page has the lab selector or the exit button.
+async function iasOpen(page, credentials = iasCredentials()) {
+  await page.load(`${IAS.base}/laboratory_in_outs`);
+  let state = await page.read();
+  if (state.ready) return state;
+  if (!credentials) return { ...state, needsLogin: true };
+  await page.load(`${IAS.base}/login`);
+  const form = await page.read();
+  if (!form.login) return { ...form, needsLogin: true, message: 'DEI login page not recognised' };
+  await run(page.contents, iasPageScript('login', credentials), 8000);
+  await page.settle(15000);
+  await page.load(`${IAS.base}/laboratory_in_outs`);
+  state = await page.read();
+  return state.ready ? state : { ...state, needsLogin: true, badCredentials: true };
+}
+function iasResult(state, extra = {}) {
+  const credentials = iasCredentials();
+  return { configured: Boolean(credentials) && !state.needsLogin, account: credentials?.email || '', fromEnv: Boolean(credentials?.fromEnv), labs: state.labs || [], inside: Boolean(state.inside), currentLab: state.currentLab || '', needsLogin: Boolean(state.needsLogin), ...extra };
+}
+handle('ias:state', () => withIasPage(async page => iasResult(await iasOpen(page))));
+handle('ias:login', async ({ email, password } = {}) => {
+  if (!email || !password) return { ok: false, message: 'Enter email and password' };
+  await iasSession().clearStorageData();
+  return withIasPage(async page => {
+    const state = await iasOpen(page, { email, password });
+    if (state.needsLogin) return { ok: false, message: 'Sign-in failed: check email and password' };
+    if (!safeStorage.isEncryptionAvailable()) return { ok: true, ...iasResult(state), message: 'Signed in. The system keychain is unavailable: the password was not saved, only the session is kept.' };
+    writeFileSync(IAS.file(), safeStorage.encryptString(JSON.stringify({ email, password })), { mode: 0o600 });
+    return { ok: true, ...iasResult(state), message: 'Sign-in saved' };
   });
-}
-async function runIas(action, laboratory = '') {
-  const bridge = app.isPackaged ? join(process.resourcesPath, 'app.asar.unpacked', 'scripts', 'ias_bridge.py') : join(import.meta.dirname, 'scripts', 'ias_bridge.py');
-  const { iasProject, python } = integrations();
-  if (!iasProject || !existsSync(iasProject)) return { ok: false, labs: [], message: 'Cartella del progetto IAS non impostata' };
-  const result = await runCommand(python, [bridge, action, laboratory, iasProject], { cwd: iasProject });
-  const line = result.output.split('\n').findLast(value => value.startsWith('NUVIA_JSON:'));
-  if (!line) return { ok: false, labs: [], message: result.output.trim().split('\n').at(-1) || 'Risposta IAS non valida' };
-  return JSON.parse(line.slice('NUVIA_JSON:'.length));
-}
-handle('ias:status', () => {
-  const { iasProject } = integrations();
-  const project = Boolean(iasProject && existsSync(iasProject));
-  const credentials = Boolean(process.env.DEI_USER && process.env.DEI_PASSWORD);
-  return { configured: project && credentials, project, credentials };
 });
-handle('dialog:folder', async title => {
-  const result = await dialog.showOpenDialog(mainWindow, { title: title || 'Scegli una cartella', properties: ['openDirectory'] });
-  return result.canceled ? null : result.filePaths[0];
-});
+handle('ias:logout', async () => { rmSync(IAS.file(), { force: true }); await iasSession().clearStorageData(); return { ok: true }; });
+handle('ias:enter', laboratory => withIasPage(async page => {
+  const state = await iasOpen(page);
+  if (state.needsLogin) return iasResult(state, { ok: false, message: 'Sign in to DEI Labs first' });
+  if (state.inside) return iasResult(state, { ok: true, message: `You are already checked in to ${state.currentLab}` });
+  const done = await run(page.contents, iasPageScript('enter', String(laboratory || '')), 8000, { ok: false });
+  if (!done?.ok) return iasResult(state, { ok: false, message: `Lab unavailable: ${laboratory}` });
+  await page.settle(15000);
+  await page.load(`${IAS.base}/laboratory_in_outs`);
+  const after = await page.read();
+  return iasResult(after, { ok: after.inside, message: after.inside ? `Checked in to ${after.currentLab || laboratory}` : 'The site did not confirm the check-in' });
+}));
+handle('ias:exit', () => withIasPage(async page => {
+  const state = await iasOpen(page);
+  if (!state.inside) return iasResult(state, { ok: true, message: 'You are not checked in to any lab' });
+  await run(page.contents, iasPageScript('exit'), 8000);
+  await page.settle(15000);
+  await page.load(`${IAS.base}/laboratory_in_outs`);
+  const after = await page.read();
+  return iasResult(after, { ok: !after.inside, message: after.inside ? 'The site did not confirm the check-out' : `Checked out of ${state.currentLab}` });
+}));
 handle('app:info', () => ({ platform: process.platform, version: app.getVersion(), userData: app.getPath('userData') }));
-handle('ias:labs', () => runIas('list'));
-handle('ias:login', laboratory => runIas('enter', String(laboratory || '')));
+
 
 handle('notifications:list', () => readJson(paths.notifications(), []));
 handle('notifications:add', item => addNotification(item));
@@ -988,7 +1135,7 @@ async function readClaudeWebLimits(force) {
   let data = open && /claude\.ai/.test(open.webContents.getURL()) ? await read(open.webContents) : null;
   if (!data?.usage) data = await withHiddenPage(service.id, 'https://claude.ai/settings/usage', read, { settle: 2000 });
   const limits = normalizeClaudeLimits(data?.usage);
-  const value = limits && (limits.session || limits.weekly) ? { ...limits, plan: data.plan, updatedAt: Date.now() } : { loggedOut: Boolean(data?.loggedOut), error: data?.error || (data ? 'Limiti non disponibili' : 'claude.ai non raggiungibile') };
+  const value = limits && (limits.session || limits.weekly) ? { ...limits, plan: data.plan, updatedAt: Date.now() } : { loggedOut: Boolean(data?.loggedOut), error: data?.error || (data ? 'Limits unavailable' : 'claude.ai unreachable') };
   Object.assign(claudeWeb, { at: Date.now(), value });
   return value;
 }

@@ -77,9 +77,9 @@ export function applyLiveState(value) {
 }
 
 function serviceForm(initial = {}) {
-  const name = h('input', { placeholder: 'Es. Gmail lavoro', value: initial.name || '', required: true, autocomplete: 'off' });
+  const name = h('input', { placeholder: 'e.g. Work Gmail', value: initial.name || '', required: true, autocomplete: 'off' });
   const url = h('input', { placeholder: 'https://', value: initial.url || '', type: 'url', required: true, autocomplete: 'off', spellcheck: false });
-  return { name, url, fields: [h('label.field', h('span', 'Nome'), name), h('label.field', h('span', 'Indirizzo'), url, h('small', 'Il login resta salvato in un profilo separato solo per questo servizio.'))] };
+  return { name, url, fields: [h('label.field', h('span', 'Name'), name), h('label.field', h('span', 'Address'), url, h('small', 'Your sign-in is kept in a separate profile just for this service.'))] };
 }
 
 function validUrl(value) {
@@ -94,24 +94,24 @@ export function openAddService(preset = null) {
     type: 'button',
     on: { click: event => { form.name.value = item.name; form.url.value = item.url; $$('.preset', presets).forEach(button => button.classList.toggle('on', button === event.currentTarget)); form.name.focus(); } }
   }, h('span.favicon', item.name[0]), h('span', item.name))));
-  const submit = h('button.btn.accent', { type: 'submit', id: 'save-service' }, 'Aggiungi');
+  const submit = h('button.btn.accent', { type: 'submit', id: 'save-service' }, 'Add');
   const dialog = sheet({
-    title: 'Nuovo servizio', subtitle: 'Scegli un preset o incolla un indirizzo qualsiasi.',
+    title: 'New service', subtitle: 'Pick a preset or paste any address.',
     body: [presets, ...form.fields],
-    foot: [h('button.btn.ghost', { type: 'button', on: { click: () => dialog.close() } }, 'Annulla'), submit]
+    foot: [h('button.btn.ghost', { type: 'button', on: { click: () => dialog.close() } }, 'Cancel'), submit]
   });
   dialog.id = 'service-dialog';
   const formEl = h('form.sheet-inner', { method: 'dialog', on: { submit: async event => {
     event.preventDefault();
     const href = validUrl(form.url.value);
     if (!form.name.value.trim()) { form.name.focus(); return; }
-    if (!href) { form.url.setCustomValidity('Serve un indirizzo web valido'); form.url.reportValidity(); return; }
+    if (!href) { form.url.setCustomValidity('Enter a valid web address'); form.url.reportValidity(); return; }
     const service = { id: crypto.randomUUID(), name: form.name.value.trim(), url: href };
     state.services.push({ ...service, kind: serviceKind(service), group: serviceGroup(service) });
     await persist();
     dialog.close();
     await openService(service.id);
-    toast(`${service.name} aggiunto`, { action: { label: 'Aggiungine un altro', run: () => openAddService() } });
+    toast(`${service.name} added`, { action: { label: 'Add another', run: () => openAddService() } });
   } } });
   form.url.addEventListener('input', () => form.url.setCustomValidity(''));
   formEl.append(...dialog.firstChild.childNodes);
@@ -125,19 +125,19 @@ export function openEditService(id) {
   if (!service) return;
   const form = serviceForm(service);
   const dialog = sheet({
-    title: 'Modifica servizio', subtitle: hostOf(service.url), body: form.fields,
-    foot: [h('button.btn.ghost.danger.left', { type: 'button', on: { click: async () => { dialog.close(); removeService(id); } } }, icon('trash-2'), 'Rimuovi'),
-      h('button.btn.ghost', { type: 'button', on: { click: () => dialog.close() } }, 'Annulla'),
+    title: 'Edit service', subtitle: hostOf(service.url), body: form.fields,
+    foot: [h('button.btn.ghost.danger.left', { type: 'button', on: { click: async () => { dialog.close(); removeService(id); } } }, icon('trash-2'), 'Remove'),
+      h('button.btn.ghost', { type: 'button', on: { click: () => dialog.close() } }, 'Cancel'),
       h('button.btn.accent', { type: 'button', on: { click: async () => {
         const href = validUrl(form.url.value);
-        if (!href || !form.name.value.trim()) { form.url.setCustomValidity(href ? '' : 'Indirizzo non valido'); form.url.reportValidity(); return; }
+        if (!href || !form.name.value.trim()) { form.url.setCustomValidity(href ? '' : 'Invalid address'); form.url.reportValidity(); return; }
         const changedUrl = href !== service.url;
         Object.assign(service, { name: form.name.value.trim(), url: href, kind: serviceKind({ ...service, url: href }), group: serviceGroup({ ...service, url: href }) });
         await persist();
         if (changedUrl) { await api.removeView(id); if (state.serviceId === id) openService(id); }
         dialog.close();
         renderTopbar();
-      } } }, 'Salva')]
+      } } }, 'Save')]
   });
   openModal(dialog);
 }
@@ -145,25 +145,25 @@ export function openEditService(id) {
 export async function removeService(id) {
   const service = state.services.find(item => item.id === id);
   if (!service) return;
-  if (!await confirmDialog(`Rimuovere ${service.name}?`, 'Il servizio sparisce dalla barra laterale. I dati di accesso restano sul computer finché non li cancelli.', { confirm: 'Rimuovi', danger: true })) return;
+  if (!await confirmDialog(`Remove ${service.name}?`, 'It will disappear from the sidebar. Sign-in data stays on this computer until you clear it.', { confirm: 'Remove', danger: true })) return;
   state.services = state.services.filter(item => item.id !== id);
   await persist();
   await api.removeView(id);
   if (state.serviceId === id) go('home');
-  toast(`${service.name} rimosso`);
+  toast(`${service.name} removed`);
 }
 
 // Ctrl+K: jump to any page or service.
 export function openPalette() {
   if ($('dialog.palette[open]')) return;
-  const input = h('input', { placeholder: 'Vai a un servizio o a una sezione…', autocomplete: 'off', spellcheck: false });
+  const input = h('input', { placeholder: 'Go to a service or section…', autocomplete: 'off', spellcheck: false });
   const results = h('div.results');
   const dialog = h('dialog.palette', { dataset: { transient: '1' } }, input, results);
   dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
   const entries = [
-    ...Object.entries(PAGES).map(([route, label]) => ({ label, hint: 'Sezione', icon: { home: 'house', messages: 'message-circle', calendar: 'calendar', music: 'music', ai: 'gauge' }[route], run: () => go(route) })),
+    ...Object.entries(PAGES).map(([route, label]) => ({ label, hint: 'Section', icon: { home: 'house', messages: 'message-circle', calendar: 'calendar', music: 'music', ai: 'gauge' }[route], run: () => go(route) })),
     ...state.services.map((service, index) => ({ label: service.name, hint: index < 9 ? `Ctrl+${index + 1}` : hostOf(service.url), service, run: () => openService(service.id) })),
-    { label: 'Aggiungi servizio', hint: 'Azione', icon: 'plus', run: () => openAddService() }
+    { label: 'Add service', hint: 'Action', icon: 'plus', run: () => openAddService() }
   ];
   let selected = 0; let visible = entries;
   const render = () => {

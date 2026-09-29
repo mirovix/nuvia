@@ -2,9 +2,9 @@
 <body><div role="main" id="agenda"></div>
 <script>
   // Agenda chips carry their full description in aria-label, like Google Calendar.
-  const months = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const label = (offset, text) => { const d = new Date(); d.setDate(d.getDate() + offset); return text + ', ' + d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear(); };
-  for (const [offset, text] of [[0, '23:30 - 23:50, Revisione tesi, Aula Magna'], [1, '10:00 - 11:30, Lezione di Robotica, DEI'], [2, 'Tutto il giorno, Hackathon']]) {
+  for (const [offset, text] of [[0, '23:30 - 23:50, Thesis review, Main hall'], [1, '10:00 - 11:30, Robotics lecture, DEI'], [2, 'All day, Hackathon']]) {
     const div = document.createElement('div'); div.setAttribute('data-eventid', 'e' + offset); div.setAttribute('aria-label', label(offset, text)); div.textContent = text; document.getElementById('agenda').append(div);
   }
 </script></body></html>

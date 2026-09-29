@@ -7,7 +7,7 @@ import { initMessages, refreshMessages } from './messages.js';
 import { initCalendar, refreshCalendar } from './calendar.js';
 import { initMusic, refreshMusic } from './music.js';
 import './commute.js';
-import { initWidgets, refreshWeather, watchFavoriteTrains } from './widgets.js';
+import { initWidgets, refreshWeather, watchFavoriteTrains, refreshBoard, refreshIas, openIasLogin } from './widgets.js';
 import { initNotifications, refreshNotifications } from './notifications.js';
 import { initAi, refreshUsage } from './ai.js';
 import { initSettings, applyAppearance, loadExtensions } from './settings.js';
@@ -26,7 +26,7 @@ function trackUnread() {
     const previous = unreadBaseline.get(service.id);
     if (previous !== undefined && current !== previous) refreshFromCounters[service.group]();
     if (watchUnread && previous !== undefined && current > previous) {
-      api.addNotification({ title: service.name, body: service.group === 'mail' ? `${current - previous} ${current - previous === 1 ? 'nuova email' : 'nuove email'}` : `${current - previous} ${current - previous === 1 ? 'nuovo messaggio' : 'nuovi messaggi'}`, type: service.group, serviceId: service.id });
+      api.addNotification({ title: service.name, body: service.group === 'mail' ? `${current - previous} ${current - previous === 1 ? 'new email' : 'new emails'}` : `${current - previous} ${current - previous === 1 ? 'new message' : 'new messages'}`, type: service.group, serviceId: service.id });
     }
     unreadBaseline.set(service.id, current);
   }
@@ -36,7 +36,7 @@ function wireWindow() {
   $('#window-min').addEventListener('click', () => api.minimize());
   $('#window-max').addEventListener('click', () => api.maximize());
   $('#window-close').addEventListener('click', () => api.close());
-  const setMax = ({ maximized }) => { const button = $('#window-max'); button.replaceChildren(icon(maximized ? 'copy' : 'square')); button.title = maximized ? 'Ripristina' : 'Ingrandisci'; };
+  const setMax = ({ maximized }) => { const button = $('#window-max'); button.replaceChildren(icon(maximized ? 'copy' : 'square')); button.title = maximized ? 'Restore' : 'Maximize'; };
   api.onWindowState(setMax);
   api.windowState().then(setMax);
   $('#topbar').addEventListener('dblclick', event => { if (!event.target.closest('button, input')) api.maximize(); });
@@ -67,6 +67,9 @@ async function init() {
   on('go', route => go(route));
   on('open-service', id => openService(id));
   on('refresh-weather', refreshWeather);
+  on('trains-config', refreshBoard);
+  on('ias-refresh', refreshIas);
+  on('ias-login', openIasLogin);
   on('hero', renderHero);
   on('live', trackUnread);
   on('services', loadExtensions);
@@ -91,6 +94,7 @@ async function init() {
   every(20 * 60000, refreshWeather);
   every(60000, refreshUsage);
   every(5 * 60000, watchFavoriteTrains);
+  every(2 * 60000, refreshBoard);
   let musicTick = 0;
   every(1500, () => {
     musicTick += 1;
@@ -104,5 +108,5 @@ async function init() {
 
 init().catch(error => {
   console.error(error);
-  document.body.append(Object.assign(document.createElement('pre'), { textContent: `Nuvia non è riuscita ad avviarsi:\n${error.stack || error}`, style: 'position:fixed;inset:20px;z-index:9999;padding:20px;background:#200;color:#fdd;white-space:pre-wrap' }));
+  document.body.append(Object.assign(document.createElement('pre'), { textContent: `Nuvia failed to start:\n${error.stack || error}`, style: 'position:fixed;inset:20px;z-index:9999;padding:20px;background:#200;color:#fdd;white-space:pre-wrap' }));
 });

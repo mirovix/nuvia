@@ -1,6 +1,6 @@
 import { api, state, $, $$, emit, fill, h, icon, hostOf } from './core.js';
 
-export const PAGES = { home: 'Panoramica', messages: 'Messaggi', calendar: 'Calendario', music: 'Musica', ai: 'Claude & Codex' };
+export const PAGES = { home: 'Overview', messages: 'Messages', calendar: 'Calendar', music: 'Music', ai: 'Claude & Codex' };
 
 function markNav() {
   $$('#nav .nav-item').forEach(item => item.classList.toggle('active', state.route === item.dataset.route));
@@ -30,10 +30,10 @@ export function renderViewState() {
   if (!service) return fill(box);
   const live = state.live.get(service.id);
   if (live?.crashed) {
-    return fill(box, icon('triangle-alert'), h('h3', `${service.name} si è fermato`), h('span', 'La pagina del servizio si è chiusa in modo inatteso. Se succede spesso, prova a disattivare le estensioni su questo servizio.'),
-      h('button.btn.accent', { on: { click: () => api.reload(service.id) } }, icon('rotate-cw'), 'Ricarica'));
+    return fill(box, icon('triangle-alert'), h('h3', `${service.name} stopped`), h('span', 'The service page closed unexpectedly. If this keeps happening, try turning off extensions for this service.'),
+      h('button.btn.accent', { on: { click: () => api.reload(service.id) } }, icon('rotate-cw'), 'Reload'));
   }
-  fill(box, h('div.spinner'), h('span', `Apertura di ${service.name}…`));
+  fill(box, h('div.spinner'), h('span', `Opening ${service.name}…`));
 }
 
 export async function go(route) {

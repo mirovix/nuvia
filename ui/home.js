@@ -10,8 +10,8 @@ export const DEFAULT_LAYOUT = [
   { id: 'commute', size: 'l' },
   { id: 'services', size: 'm' }, { id: 'ias', size: 's' }, { id: 'notion', size: 's' }
 ];
-const SIZES = [{ value: 's', label: 'S', title: 'Piccolo' }, { value: 'm', label: 'M', title: 'Medio' }, { value: 'l', label: 'L', title: 'Tutta la riga' }];
-const HEIGHTS = [{ value: 'compact', label: 'Bassa' }, { value: 'normal', label: 'Normale' }, { value: 'tall', label: 'Alta' }];
+const SIZES = [{ value: 's', label: 'S', title: 'Small' }, { value: 'm', label: 'M', title: 'Medium' }, { value: 'l', label: 'L', title: 'Full row' }];
+const HEIGHTS = [{ value: 'compact', label: 'Low' }, { value: 'normal', label: 'Normal' }, { value: 'tall', label: 'Tall' }];
 
 export function defineWidget(def) { registry.set(def.id, def); }
 
@@ -76,8 +76,8 @@ function mountWidget(def, entry) {
   };
   for (const action of def.actions?.(ctx) || []) actions.append(action);
   actions.append(
-    h('button.icon-btn.small.w-tool', { title: 'Opzioni blocco', dataset: { act: 'settings' }, on: { click: event => openWidgetSettings(def, event.currentTarget) } }, icon('sliders-horizontal')),
-    h('button.icon-btn.small.w-tool.w-grip', { title: 'Trascina per spostare', dataset: { act: 'drag' } }, icon('grip-vertical')));
+    h('button.icon-btn.small.w-tool', { title: 'Widget options', dataset: { act: 'settings' }, on: { click: event => openWidgetSettings(def, event.currentTarget) } }, icon('sliders-horizontal')),
+    h('button.icon-btn.small.w-tool.w-grip', { title: 'Drag to move', dataset: { act: 'drag' } }, icon('grip-vertical')));
   wireDrag(el, $('.w-grip', el));
   const cleanup = (def.topics || []).map(topic => on(topic, () => { if (el.isConnected) ctx.render(); }));
   mounted.set(def.id, { el, ctx, cleanup });
@@ -133,7 +133,7 @@ function optionControl(def, option, onChange) {
     return h('div.opt', h('span', option.label), list.length ? list.map(service => h('label.check', toggle(!excluded.has(service.id), value => {
       if (value) excluded.delete(service.id); else excluded.add(service.id);
       onChange([...excluded]);
-    }, service.name), service.name)) : h('small.muted', 'Nessun servizio di questo tipo.'));
+    }, service.name), service.name)) : h('small.muted', 'No services of this type.'));
   }
   return null;
 }
@@ -143,10 +143,10 @@ export async function openWidgetSettings(def, anchor) {
   let dialog;
   const content = h('div.pop-body',
     h('h3', def.title),
-    h('div.opt', h('span', 'Larghezza'), segmented(SIZES, entry.size, size => { updateEntry(def.id, { size }); applyEntry(def.id); })),
-    h('div.opt', h('span', 'Altezza'), segmented(HEIGHTS, entry.height, height => { updateEntry(def.id, { height }); applyEntry(def.id); })),
+    h('div.opt', h('span', 'Width'), segmented(SIZES, entry.size, size => { updateEntry(def.id, { size }); applyEntry(def.id); })),
+    h('div.opt', h('span', 'Height'), segmented(HEIGHTS, entry.height, height => { updateEntry(def.id, { height }); applyEntry(def.id); })),
     (def.options || []).map(option => optionControl(def, option, value => { updateEntry(def.id, { options: { [option.key]: value } }); applyEntry(def.id); })),
-    h('button.btn.sm.ghost', { type: 'button', on: { click: () => { updateEntry(def.id, { hidden: true }); dialog.close(); renderGrid(); } } }, icon('eye-off'), 'Nascondi blocco'));
+    h('button.btn.sm.ghost', { type: 'button', on: { click: () => { updateEntry(def.id, { hidden: true }); dialog.close(); renderGrid(); } } }, icon('eye-off'), 'Hide widget'));
   dialog = await popover(anchor, content, { width: 300 });
 }
 
@@ -156,20 +156,20 @@ export function openCustomize() {
   const renderList = () => fill(list, items.map((item, index) => {
     const def = registry.get(item.id);
     return h(`div.layout-row${item.hidden ? '.off' : ''}`,
-      h('div.order', h('button.icon-btn', { type: 'button', title: 'Su', disabled: index === 0, on: { click: () => move(index, -1) } }, icon('chevron-up')), h('button.icon-btn', { type: 'button', title: 'Giù', disabled: index === items.length - 1, on: { click: () => move(index, 1) } }, icon('chevron-down'))),
+      h('div.order', h('button.icon-btn', { type: 'button', title: 'Up', disabled: index === 0, on: { click: () => move(index, -1) } }, icon('chevron-up')), h('button.icon-btn', { type: 'button', title: 'Down', disabled: index === items.length - 1, on: { click: () => move(index, 1) } }, icon('chevron-down'))),
       h('span.w-icon', icon(def.icon)), h('strong', def.title),
       segmented(SIZES, item.size, size => { item.size = size; commit(); }),
-      toggle(!item.hidden, visible => { item.hidden = !visible; commit(); renderList(); }, `Mostra ${def.title}`));
+      toggle(!item.hidden, visible => { item.hidden = !visible; commit(); renderList(); }, `Show ${def.title}`));
   }));
   const move = (index, delta) => { const [moved] = items.splice(index, 1); items.splice(index + delta, 0, moved); commit(); renderList(); };
   const commit = () => { saveLayout(items); renderGrid(); };
   renderList();
   const columnsControl = segmented([{ value: 0, label: 'Auto' }, { value: 2, label: '2' }, { value: 3, label: '3' }, { value: 4, label: '4' }], Number(state.prefs.columns) || 0, value => { state.prefs.columns = value; savePrefs(); renderGrid(); });
   const dialog = sheet({
-    title: 'Personalizza panoramica', subtitle: 'Mostra, ordina e ridimensiona i blocchi. Dentro ogni blocco trovi altre opzioni.',
-    body: [h('div.field', h('span', 'Colonne'), columnsControl), list],
-    foot: [h('button.btn.ghost.left', { type: 'button', on: { click: () => { items = DEFAULT_LAYOUT.map(entry => ({ height: registry.get(entry.id)?.height || 'normal', hidden: false, options: {}, ...entry })); commit(); renderList(); } } }, icon('rotate-ccw'), 'Ripristina'),
-      h('button.btn.accent', { type: 'button', on: { click: () => dialog.close() } }, 'Fatto')]
+    title: 'Customize overview', subtitle: 'Show, reorder and resize widgets. Each widget has more options of its own.',
+    body: [h('div.field', h('span', 'Columns'), columnsControl), list],
+    foot: [h('button.btn.ghost.left', { type: 'button', on: { click: () => { items = DEFAULT_LAYOUT.map(entry => ({ height: registry.get(entry.id)?.height || 'normal', hidden: false, options: {}, ...entry })); commit(); renderList(); } } }, icon('rotate-ccw'), 'Reset'),
+      h('button.btn.accent', { type: 'button', on: { click: () => dialog.close() } }, 'Done')]
   });
   dialog.id = 'customize-dialog';
   openModal(dialog);
@@ -178,7 +178,7 @@ export function openCustomize() {
 // ---------------------------------------------------------------------------
 // Hero
 
-function greeting(hour) { return hour < 5 ? 'Buonanotte' : hour < 13 ? 'Buongiorno' : hour < 18 ? 'Buon pomeriggio' : 'Buonasera'; }
+function greeting(hour) { return hour < 5 ? 'Good night' : hour < 13 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; }
 
 export function renderHero() {
   const now = new Date();
@@ -186,12 +186,12 @@ export function renderHero() {
   if (!hero.firstChild) {
     hero.append(
       h('div', h('p.hello#hello'), h('h1.clock#clock'), h('div.hero-date#today'), h('div.glance#glance')),
-      h('button.weather-card#weather-card', { type: 'button', title: 'Cambia città', on: { click: () => emit('open-settings', 'general') } }));
+      h('button.weather-card#weather-card', { type: 'button', title: 'Change city', on: { click: () => emit('open-settings', 'general') } }));
   }
   const name = state.prefs.name ? h('b', state.prefs.name) : null;
   fill($('#hello'), `${greeting(now.getHours())}${name ? ', ' : ''}`, name);
   fill($('#clock'), pad(now.getHours()), h('span.colon', ':'), pad(now.getMinutes()));
-  $('#today').textContent = now.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+  $('#today').textContent = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
   renderGlance();
 }
 
@@ -199,11 +199,11 @@ export function renderGlance() {
   const box = $('#glance'); if (!box) return;
   const chips = [];
   const mailUnread = (state.mail?.accounts || []).reduce((total, account) => total + (account.unread || 0), 0);
-  if (state.mail?.accounts?.length) chips.push(h('button.chip', { on: { click: () => $('.widget[data-widget="mail"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) } }, icon('mail'), mailUnread ? `${mailUnread} email da leggere` : 'Posta in pari'));
+  if (state.mail?.accounts?.length) chips.push(h('button.chip', { on: { click: () => $('.widget[data-widget="mail"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) } }, icon('mail'), mailUnread ? `${mailUnread} unread ${mailUnread === 1 ? 'email' : 'emails'}` : 'Inbox clear'));
   const chatUnread = (state.messages?.items || []).reduce((total, item) => total + (item.unread || 0), 0);
-  if (state.messages?.items?.length) chips.push(h('button.chip', { on: { click: () => emit('go', 'messages') } }, icon('message-circle'), chatUnread ? `${chatUnread} messaggi non letti` : 'Nessuna chat in sospeso'));
+  if (state.messages?.items?.length) chips.push(h('button.chip', { on: { click: () => emit('go', 'messages') } }, icon('message-circle'), chatUnread ? `${chatUnread} unread ${chatUnread === 1 ? 'message' : 'messages'}` : 'No pending chats'));
   const next = (state.calendar?.events || []).find(event => event.end > Date.now() && !event.allDay);
-  if (next) chips.push(h('button.chip', { on: { click: () => emit('go', 'calendar') } }, icon('calendar'), `${next.start <= Date.now() ? 'Ora' : clock(next.start)} · ${next.title}`));
+  if (next) chips.push(h('button.chip', { on: { click: () => emit('go', 'calendar') } }, icon('calendar'), `${next.start <= Date.now() ? 'Now' : clock(next.start)} · ${next.title}`));
   if (state.music?.title && !state.music.paused) chips.push(h('button.chip.on', { on: { click: () => emit('go', 'music') } }, icon('music'), `${state.music.title} — ${state.music.artist}`));
   fill(box, chips);
 }

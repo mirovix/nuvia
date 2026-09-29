@@ -9,7 +9,6 @@ const listen = channel => callback => {
 
 contextBridge.exposeInMainWorld('nuvia', {
   platform: process.platform,
-  chooseFolder: invoke('dialog:folder'),
   appInfo: invoke('app:info'),
   minimize: invoke('window:minimize'),
   maximize: invoke('window:maximize'),
@@ -65,10 +64,13 @@ contextBridge.exposeInMainWorld('nuvia', {
   suggestPlaces: invoke('places:suggest'),
   route: invoke('commute:route'),
   trainStatus: invoke('trains:status'),
-  ritardometroConfig: invoke('ritardometro:config'),
-  iasStatus: invoke('ias:status'),
-  iasLabs: invoke('ias:labs'),
-  iasLogin: invoke('ias:login'),
+  trainBoard: invoke('trains:board'),
+  trainImport: invoke('trains:import'),
+  iasState: invoke('ias:state'),
+  iasSignIn: invoke('ias:login'),
+  iasSignOut: invoke('ias:logout'),
+  iasEnter: invoke('ias:enter'),
+  iasExit: invoke('ias:exit'),
 
   listNotifications: invoke('notifications:list'),
   addNotification: invoke('notifications:add'),

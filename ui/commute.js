@@ -1,7 +1,7 @@
 import { api, state, $, h, icon, fill, on, savePrefs, segmented, clock, empty } from './core.js';
 import { defineWidget } from './home.js';
 
-const MODES = [{ value: 'car', icon: 'car', title: 'Auto' }, { value: 'bike', icon: 'bike', title: 'Bici' }, { value: 'foot', icon: 'footprints', title: 'A piedi' }];
+const MODES = [{ value: 'car', icon: 'car', title: 'Car' }, { value: 'bike', icon: 'bike', title: 'Bike' }, { value: 'foot', icon: 'footprints', title: 'Walk' }];
 const TURN_ICON = { left: 'corner-up-left', right: 'corner-up-right', 'sharp left': 'corner-up-left', 'sharp right': 'corner-up-right', 'slight left': 'arrow-up-left', 'slight right': 'arrow-up-right', straight: 'arrow-up', uturn: 'undo-2' };
 const ui = { map: null, layer: null, tiles: null, route: null, error: '', loading: false, timer: null };
 
@@ -112,16 +112,16 @@ function renderResult(ctx) {
   const alternatives = ctx.body.querySelector('.alternatives');
   const mapBox = ctx.body.querySelector('.map');
   if (!state.prefs.homeDestination && !state.prefs.homeDestinationPlace) {
-    fill(summary, h('div.sub', 'Scrivi dove vuoi andare: il percorso compare qui, senza aprire Maps.'));
-    fill(steps, empty('map-pin', 'Nessun percorso', 'Imposta partenza e arrivo.'));
+    fill(summary, h('div.sub', 'Enter where you’re going and the route shows up here, no need to open Maps.'));
+    fill(steps, empty('map-pin', 'No route', 'Set a start and a destination.'));
     return;
   }
-  if (ui.loading) { fill(summary, h('div.big', '…'), h('div.sub', 'Calcolo del percorso')); return; }
-  if (ui.error) { fill(summary, h('div.sub', { style: 'color:var(--danger)' }, ui.error)); fill(steps, empty('triangle-alert', 'Percorso non disponibile', ui.error)); fill(alternatives); return; }
+  if (ui.loading) { fill(summary, h('div.big', '…'), h('div.sub', 'Calculating route')); return; }
+  if (ui.error) { fill(summary, h('div.sub', { style: 'color:var(--danger)' }, ui.error)); fill(steps, empty('triangle-alert', 'Route unavailable', ui.error)); fill(alternatives); return; }
   if (!route) return;
   const modeLabel = MODES.find(mode => mode.value === route.mode)?.title || '';
-  ctx.setMeta(`${route.minutes} min · ${route.kilometers.toLocaleString('it-IT')} km · ${modeLabel.toLowerCase()}`);
-  fill(summary, h('div.big', String(route.minutes), h('small', 'min')), h('div.sub', `${route.kilometers.toLocaleString('it-IT')} km · arrivo alle ${clock(route.arrival)} · senza traffico in tempo reale`));
+  ctx.setMeta(`${route.minutes} min · ${route.kilometers.toLocaleString('en-GB')} km · ${modeLabel.toLowerCase()}`);
+  fill(summary, h('div.big', String(route.minutes), h('small', 'min')), h('div.sub', `${route.kilometers.toLocaleString('en-GB')} km · arrive at ${clock(route.arrival)} · no live traffic`));
   fill(steps,
     h('div.route-ends', h('div', h('b', 'A'), h('span', { title: route.origin.full || route.origin.label }, route.origin.label)), h('div', h('b', 'B'), h('span', { title: route.destination.full || route.destination.label }, route.destination.label))),
     route.steps.map(step => h('div.step', h('span.turn', icon(stepIcon(step))), h('span', step.text), h('small', step.type === 'arrive' ? '' : step.distance))));
@@ -129,7 +129,7 @@ function renderResult(ctx) {
   const choices = (route.destinationChoices || []).slice(1).filter(choice => choice.score > (route.destinationChoices[0].score - 6));
   const originChoices = (route.originChoices || []).slice(1).filter(choice => choice.score > (route.originChoices[0].score - 6));
   fill(alternatives, [...originChoices.map(choice => ({ choice, key: 'originPlace', letter: 'A' })), ...choices.map(choice => ({ choice, key: 'destinationPlace', letter: 'B' }))].length
-    ? [h('span', 'Intendevi:'), ...originChoices.map(choice => h('button.chip', { on: { click: () => pick(ctx, 'homeOriginPlace', 'homeOrigin', choice) } }, h('b.mono', 'A'), choice.label)),
+    ? [h('span', 'Did you mean:'), ...originChoices.map(choice => h('button.chip', { on: { click: () => pick(ctx, 'homeOriginPlace', 'homeOrigin', choice) } }, h('b.mono', 'A'), choice.label)),
       ...choices.map(choice => h('button.chip', { on: { click: () => pick(ctx, 'homeDestinationPlace', 'homeDestination', choice) } }, h('b.mono', 'B'), choice.label))] : []);
   if (ensureMap(mapBox)) drawRoute(route);
 }
@@ -140,8 +140,8 @@ function pick(ctx, placeKey, textKey, choice) {
 }
 
 defineWidget({
-  id: 'commute', title: 'Verso casa', icon: 'navigation', size: 'l', height: 'tall', topics: [],
-  actions: ctx => [h('button.icon-btn.small', { title: 'Ricalcola', on: { click: () => compute(ctx) } }, icon('refresh-cw'))],
+  id: 'commute', title: 'Commute', icon: 'navigation', size: 'l', height: 'tall', topics: [],
+  actions: ctx => [h('button.icon-btn.small', { title: 'Recalculate', on: { click: () => compute(ctx) } }, icon('refresh-cw'))],
   render(ctx, rebuild = false) {
     if (ctx.body.querySelector('.route-result') && !rebuild) {
       ctx.body.querySelector('.route-form')?.replaceWith(form(ctx));
@@ -167,18 +167,18 @@ defineWidget({
 
 function form(ctx) {
   const prefs = state.prefs;
-  const city = h('input', { placeholder: 'Città di arrivo', value: prefs.homeCity || '', autocomplete: 'off', on: { change: () => { prefs.homeCity = city.value.trim(); prefs.homeDestinationPlace = null; savePrefs(); } } });
+  const city = h('input', { placeholder: 'Destination city', value: prefs.homeCity || '', autocomplete: 'off', on: { change: () => { prefs.homeCity = city.value.trim(); prefs.homeDestinationPlace = null; savePrefs(); } } });
   const origin = suggestInput({
-    letter: 'A', placeholder: 'Partenza (vuoto = posizione attuale)', value: prefs.homeOriginPlace?.label || prefs.homeOrigin,
+    letter: 'A', placeholder: 'From (empty = current location)', value: prefs.homeOriginPlace?.label || prefs.homeOrigin,
     onType: text => { prefs.homeOrigin = text.trim(); prefs.homeOriginPlace = null; savePrefs(); },
     onPick: place => { prefs.homeOrigin = place.label; prefs.homeOriginPlace = place; savePrefs(); }
   });
   const destination = suggestInput({
-    letter: 'B', placeholder: 'Arrivo: via e numero civico', value: prefs.homeDestinationPlace?.label || prefs.homeDestination, city: () => city.value.trim(),
+    letter: 'B', placeholder: 'To: street and number', value: prefs.homeDestinationPlace?.label || prefs.homeDestination, city: () => city.value.trim(),
     onType: text => { prefs.homeDestination = text.trim(); prefs.homeDestinationPlace = null; savePrefs(); },
     onPick: place => { prefs.homeDestination = place.label; prefs.homeDestinationPlace = place; savePrefs(); compute(ctx); }
   });
   const mode = segmented(MODES, prefs.commuteMode || 'car', value => { prefs.commuteMode = value; savePrefs(); compute(ctx); });
-  const submit = h('button.btn.accent', { type: 'submit' }, 'Calcola');
+  const submit = h('button.btn.accent', { type: 'submit' }, 'Route');
   return h('form.route-form', { on: { submit: event => { event.preventDefault(); prefs.homeCity = city.value.trim(); savePrefs(); compute(ctx); } } }, origin.box, destination.box, city, mode, submit);
 }

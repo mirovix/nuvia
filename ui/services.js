@@ -120,12 +120,36 @@ export function openAddService(preset = null) {
   return dialog;
 }
 
+// Optional: credentials Nuvia fills in when the service's session expires
+// (e.g. a university Google Workspace that signs you out every few hours).
+function signInSection(id) {
+  const box = h('div.signin-box#signin-box');
+  const render = async () => {
+    const current = await api.signInGet(id);
+    if (!current.available) return fill(box, h('h3', 'Automatic sign-in'), h('p.muted', 'Unavailable: the system keychain is not accessible, so passwords can’t be stored safely.'));
+    const username = h('input', { placeholder: 'Email or username', value: current.username, autocomplete: 'off', spellcheck: false });
+    const password = h('input', { type: 'password', placeholder: current.saved ? 'Saved (type to replace)' : 'Password', autocomplete: 'new-password' });
+    const save = h('button.btn.sm', { type: 'button', on: { click: async () => {
+      try { await api.signInSet(id, { username: username.value, password: password.value }); toast('Automatic sign-in saved'); render(); }
+      catch (error) { toast(String(error.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
+    } } }, current.saved ? 'Update' : 'Turn on');
+    const clear = current.saved ? h('button.btn.sm.ghost.danger', { type: 'button', on: { click: async () => { await api.signInClear(id); toast('Automatic sign-in turned off'); render(); } } }, 'Turn off') : null;
+    fill(box,
+      h('h3', 'Automatic sign-in', current.saved ? h('span.state.ok', { style: 'margin-left:8px' }, 'on') : null),
+      h('p.muted', 'When this service signs you out, Nuvia fills in these details on the sign-in pages (Google, university SSO, Microsoft). They are stored encrypted in the system keychain and used only for this service. Two-step verification still needs you.'),
+      h('div.field', username), h('div.field', password), h('div.inline', save, clear));
+  };
+  render();
+  return box;
+}
+
 export function openEditService(id) {
   const service = state.services.find(item => item.id === id);
   if (!service) return;
   const form = serviceForm(service);
+  const signIn = signInSection(id);
   const dialog = sheet({
-    title: 'Edit service', subtitle: hostOf(service.url), body: form.fields,
+    title: 'Edit service', subtitle: hostOf(service.url), body: [...form.fields, signIn],
     foot: [h('button.btn.ghost.danger.left', { type: 'button', on: { click: async () => { dialog.close(); removeService(id); } } }, icon('trash-2'), 'Remove'),
       h('button.btn.ghost', { type: 'button', on: { click: () => dialog.close() } }, 'Cancel'),
       h('button.btn.accent', { type: 'button', on: { click: async () => {

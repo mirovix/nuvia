@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>University Single Sign-On</title></head>
+<body>
+<!-- Two-step SSO like Google/Microsoft: email, then password on the same page (pushState). -->
+<div id="app"></div>
+<script>
+  const app = document.getElementById('app');
+  const step1 = () => {
+    app.innerHTML = '<form id="f"><label>Email <input type="email" name="username"></label><button type="submit">Next</button></form>';
+    document.getElementById('f').addEventListener('submit', event => {
+      event.preventDefault();
+      sessionStorage.setItem('user', event.target.username.value);
+      history.pushState(null, '', '/idp/password');
+      step2();
+    });
+  };
+  const step2 = () => {
+    app.innerHTML = '<form id="f"><p>Signing in as ' + sessionStorage.getItem('user') + '</p><label>Password <input type="password" name="password"></label><button type="submit">Sign in</button><p id="err"></p></form>';
+    document.getElementById('f').addEventListener('submit', event => {
+      event.preventDefault();
+      if (sessionStorage.getItem('user') === 'mario.rossi@studenti.example.edu' && event.target.password.value === 'Segreta-123') location.href = 'https://portal.nuvia.test/?ticket=ok';
+      else document.getElementById('err').textContent = 'Wrong credentials';
+    });
+  };
+  step1();
+</script>
+</body></html>

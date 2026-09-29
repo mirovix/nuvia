@@ -14,6 +14,7 @@ import { readInfo, defaultRules } from './lib/extensions.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
+import { fillSignIn, isSignInUrl } from './lib/autologin.js';
 
 const { script } = pageScripts;
 const TEST = process.env.NUVIA_TEST === '1';
@@ -48,6 +49,8 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // Linux only: ECS's bundled SUID sandbox cannot be root-owned on many distros.
 // (--no-zygote must come from the command line: see scripts/start.mjs and scripts/after-pack.cjs.)
 if (process.platform === 'linux') app.commandLine.appendSwitch('no-sandbox');
+// Tests run without a desktop keyring: use Chromium's basic store so encryption is available.
+if (TEST) app.commandLine.appendSwitch('password-store', 'basic');
 if (IS_WINDOWS) app.setAppUserModelId('it.nuvia.desktop');
 
 function log(...parts) {
@@ -193,7 +196,8 @@ function trackState(view, service) {
   };
   contents.on('page-title-updated', () => update());
   contents.on('did-start-loading', () => update({ crashed: false }));
-  contents.on('did-stop-loading', () => update());
+  contents.on('did-stop-loading', () => { update(); watchSignIn(service, contents); });
+  contents.on('did-navigate-in-page', (_, url, isMainFrame) => { if (isMainFrame !== false && isSignInUrl(url)) setTimeout(() => watchSignIn(service, contents), 600); });
   contents.on('did-navigate-in-page', () => update());
   contents.on('page-favicon-updated', (_, favicons) => update({ favicon: favicons.find(icon => /^https:|^data:/.test(icon)) || '' }));
   contents.on('media-started-playing', () => update({ audible: true }));
@@ -211,6 +215,7 @@ function trackState(view, service) {
 async function createServiceView(service, key = service.id, url = service.url) {
   if (views.has(key) && !views.get(key).webContents.isDestroyed()) return views.get(key);
   const serviceSession = prepareSession(service.id);
+  await restoreSessionCookies(service.id);
   await loadExtensionsFor(serviceSession, service);
   const view = new WebContentsView({ webPreferences: { partition: partitionFor(service.id), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: serviceKind(service) !== 'spotify' } });
   view.setBackgroundColor('#ffffff');
@@ -249,6 +254,7 @@ function activeContents() { return views.get(activeKey)?.webContents; }
 // Hidden, sized window for pages we only read (calendar agenda, usage pages).
 async function withHiddenPage(serviceId, url, task, { settle = 2500, timeout = 25000 } = {}) {
   prepareSession(serviceId);
+  await restoreSessionCookies(serviceId);
   const window = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: { partition: partitionFor(serviceId), sandbox: true, contextIsolation: true, backgroundThrottling: false } });
   window.webContents.setAudioMuted(true);
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -270,6 +276,84 @@ function waitForLoad(contents, ms = 12000) {
   if (!contents.isLoading()) return Promise.resolve();
   return withTimeout(new Promise(resolveWait => contents.once('did-stop-loading', resolveWait)), ms);
 }
+
+// ---------------------------------------------------------------------------
+// Staying signed in
+//
+// 1. Session cookies (no expiry, e.g. a university SSO) are dropped by
+//    Chromium on every restart. Like Chrome's "continue where you left off",
+//    Nuvia keeps them across restarts, encrypted with the OS keychain.
+// 2. Services can opt in to automatic sign-in: when the session expires and
+//    the page lands on a sign-in step, Nuvia fills the saved credentials.
+
+const cookieFile = id => fileInProfile(`session-cookies-${String(id).replace(/[^a-z0-9_-]/gi, '')}.bin`);
+const signInFile = id => fileInProfile(`signin-${String(id).replace(/[^a-z0-9_-]/gi, '')}.bin`);
+const cookiesRestored = new Set();
+
+async function saveSessionCookies(serviceId) {
+  if (!safeStorage.isEncryptionAvailable()) return;
+  const cookies = (await session.fromPartition(partitionFor(serviceId)).cookies.get({})).filter(cookie => cookie.session);
+  if (!cookies.length) return rmSync(cookieFile(serviceId), { force: true });
+  writeFileSync(cookieFile(serviceId), safeStorage.encryptString(JSON.stringify(cookies.map(({ name, value, domain, hostOnly, path: cookiePath, secure, httpOnly, sameSite }) => ({ name, value, domain, hostOnly, path: cookiePath, secure, httpOnly, sameSite })))), { mode: 0o600 });
+}
+async function saveAllSessionCookies() {
+  for (const id of sessionsPrepared) if (id !== 'ias') { try { await saveSessionCookies(id); } catch (error) { log('cookies save', error.message); } }
+}
+async function restoreSessionCookies(serviceId) {
+  if (cookiesRestored.has(serviceId)) return;
+  cookiesRestored.add(serviceId);
+  if (!existsSync(cookieFile(serviceId)) || !safeStorage.isEncryptionAvailable()) return;
+  let cookies = [];
+  try { cookies = JSON.parse(safeStorage.decryptString(readFileSync(cookieFile(serviceId)))); } catch { return; }
+  const jar = session.fromPartition(partitionFor(serviceId)).cookies;
+  for (const cookie of cookies) {
+    const host = String(cookie.domain || '').replace(/^\./, '');
+    const details = { url: `${cookie.secure ? 'https' : 'http'}://${host}${cookie.path || '/'}`, name: cookie.name, value: cookie.value, path: cookie.path, secure: cookie.secure, httpOnly: cookie.httpOnly };
+    if (!cookie.hostOnly) details.domain = cookie.domain;
+    if (cookie.sameSite && cookie.sameSite !== 'unspecified') details.sameSite = cookie.sameSite;
+    try { await jar.set(details); } catch {}
+  }
+}
+
+function signInCredentials(serviceId) {
+  try { return existsSync(signInFile(serviceId)) ? JSON.parse(safeStorage.decryptString(readFileSync(signInFile(serviceId)))) : null; } catch { return null; }
+}
+
+const signInState = new Map();
+async function watchSignIn(service, contents) {
+  if (contents.isDestroyed()) return;
+  const url = contents.getURL();
+  const state = signInState.get(service.id) || { attempts: [], inFlow: false, noticeAt: 0, mfaAt: 0, signedIn: false };
+  signInState.set(service.id, state);
+  if (!isSignInUrl(url)) {
+    if (state.inFlow && state.auto) addNotification({ title: service.name, body: 'Signed back in automatically.', type: 'success', serviceId: service.id });
+    Object.assign(state, { inFlow: false, auto: false, signedIn: true });
+    return;
+  }
+  state.inFlow = true;
+  const credentials = signInCredentials(service.id);
+  if (!credentials) {
+    // Only warn about services that were signed in before, at most every 2 hours.
+    if (state.signedIn && Date.now() - state.noticeAt > 2 * 3600000) {
+      state.noticeAt = Date.now();
+      addNotification({ title: service.name, body: 'Your session expired. Open the service to sign in again, or turn on automatic sign-in in Edit service.', type: 'warning', serviceId: service.id });
+    }
+    return;
+  }
+  state.attempts = state.attempts.filter(at => Date.now() - at < 5 * 60000);
+  if (state.attempts.length >= 8) return; // never loop on a failing sign-in
+  state.attempts.push(Date.now());
+  await sleep(900);
+  const action = await run(contents, `(${fillSignIn.toString()})(${JSON.stringify(credentials.username)}, ${JSON.stringify(credentials.password)})`, 5000, 'none');
+  if (action !== 'none') state.auto = true;
+  // Multi-step pages (email, then password) change without a reload: look again.
+  if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(() => { if (!contents.isDestroyed() && isSignInUrl(contents.getURL())) watchSignIn(service, contents); }, 2500);
+  if (action === 'mfa' && Date.now() - state.mfaAt > 30 * 60000) {
+    state.mfaAt = Date.now();
+    addNotification({ title: service.name, body: 'Sign-in needs your second factor (code or approval). Open the service to finish.', type: 'warning', serviceId: service.id });
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // Extensions: never loaded into Nuvia's own UI session, enabled per service,
@@ -512,6 +596,7 @@ if (!TEST && !app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
 
 app.whenReady().then(async () => {
+  if (TEST && process.platform === 'linux') safeStorage.setUsePlainTextEncryption?.(true);
   try { await components.whenReady(); } catch {}
   migrate();
   recoverFromCrash();
@@ -523,7 +608,15 @@ app.whenReady().then(async () => {
     delay += 700;
   }
 });
-app.on('before-quit', () => writeJson(paths.guard(), { running: false, crashes: 0, pending: {}, loaded: {} }));
+let cookiesSaved = false;
+app.on('before-quit', event => {
+  writeJson(paths.guard(), { running: false, crashes: 0, pending: {}, loaded: {} });
+  if (cookiesSaved) return;
+  // Save session cookies once, then quit for real.
+  event.preventDefault();
+  withTimeout(saveAllSessionCookies(), 3000).finally(() => { cookiesSaved = true; app.quit(); });
+});
+setInterval(() => saveAllSessionCookies(), 10 * 60000);
 app.on('window-all-closed', () => { if (!IS_MAC) app.quit(); });
 app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow(); });
 
@@ -588,6 +681,16 @@ handle('services:reload', async id => {
 });
 handle('services:back', () => { const contents = activeContents(); if (contents?.navigationHistory.canGoBack()) contents.navigationHistory.goBack(); });
 handle('services:forward', () => { const contents = activeContents(); if (contents?.navigationHistory.canGoForward()) contents.navigationHistory.goForward(); });
+handle('services:signin-get', id => { const credentials = signInCredentials(id); return { saved: Boolean(credentials), username: credentials?.username || '', available: safeStorage.isEncryptionAvailable() }; });
+handle('services:signin-set', (id, { username, password } = {}) => {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('The system keychain is unavailable, so the password cannot be stored safely');
+  if (!serviceById(id) || !String(username || '').trim() || !password) throw new Error('Enter username and password');
+  writeFileSync(signInFile(id), safeStorage.encryptString(JSON.stringify({ username: String(username).trim(), password: String(password) })), { mode: 0o600 });
+  const contents = views.get(id)?.webContents;
+  if (contents && isSignInUrl(contents.getURL())) watchSignIn(serviceById(id), contents);
+  return { saved: true, username: String(username).trim() };
+});
+handle('services:signin-clear', id => { rmSync(signInFile(id), { force: true }); return { saved: false }; });
 handle('services:remove-view', id => { for (const key of [...views.keys()]) if (key === id || key.startsWith(`${id}#`)) destroyView(key); serviceState.delete(id); notifyState(); });
 handle('services:context-menu', id => {
   const service = serviceById(id); if (!service) return;
@@ -1188,5 +1291,15 @@ handle('ai:usage', async ({ force = false } = {}) => {
 if (TEST) {
   handle('debug:state', () => ({ activeKey, overlayDepth, attached: Boolean(views.get(activeKey) && attached(views.get(activeKey))), views: [...views.keys()], hostBounds, uiExtensions: session.defaultSession.extensions.getAllExtensions().length }));
   handle('debug:crash-guard', () => readJson(paths.guard(), {}));
+  handle('debug:cookie-roundtrip', async id => {
+    const jar = session.fromPartition(partitionFor(id)).cookies;
+    await jar.set({ url: 'https://portal.nuvia.test/', name: 'sso_session', value: 'kept' });
+    await saveSessionCookies(id);
+    await jar.remove('https://portal.nuvia.test/', 'sso_session');
+    cookiesRestored.delete(id);
+    await restoreSessionCookies(id);
+    const cookie = (await jar.get({ name: 'sso_session' }))[0];
+    return { value: cookie?.value || null, session: cookie?.session ?? null, encrypted: existsSync(cookieFile(id)) && !readFileSync(cookieFile(id)).toString('latin1').includes('kept') };
+  });
   handle('debug:crash-view', key => { views.get(key)?.webContents.forcefullyCrashRenderer(); return Boolean(views.get(key)); });
 }

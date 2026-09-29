@@ -81,7 +81,8 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
           { id: 'wa', name: 'WhatsApp', url: 'https://web.whatsapp.com/' },
           { id: 'spotify', name: 'Spotify', url: 'https://open.spotify.com/' },
           { id: 'claude', name: 'Claude', url: 'https://claude.ai/new' },
-          { id: 'site', name: 'Site', url: `${base}/site` }
+          { id: 'site', name: 'Site', url: `${base}/site` },
+          { id: 'portal', name: 'University Mail', url: 'https://portal.nuvia.test/' }
         ],
         'preferences.json': { migrations: ['ai-services-1'], name: 'Tester', city: 'Padova', calendar: { feeds: [{ id: 'ics-test', name: 'University', url: `${base}/cal.ics` }] } },
         'extensions.json': [helper, crashy],
@@ -357,6 +358,36 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       await ui.eval(`document.querySelector('#view-state .btn').click()`);
       await ui.waitFor(`window.nuvia.debugState().then(s => s.activeKey === 'site' && s.attached)`, { timeout: 15000 });
       await ui.waitFor(`!document.querySelector('.service[data-id="site"]').classList.contains('crashed')`, { timeout: 15000 });
+    });
+
+    await t.test('staying signed in: automatic sign-in on expired sessions, session cookies kept', async () => {
+      const portalPage = () => app.page(target => target.type === 'page' && target.url.startsWith('https://portal.nuvia.test'), 30000);
+      await ui.eval(`document.querySelector('.service[data-id="portal"]').click()`);
+      await app.page(target => target.type === 'page' && target.url.startsWith('https://sso.nuvia.test'), 30000);
+      await ui.eval(`window.__nuviaDebug.openEditService('portal')`);
+      await ui.waitFor(`document.querySelectorAll('#signin-box input').length === 2 && document.querySelector('#signin-box').closest('dialog').open`);
+      await ui.eval(`const [u, p] = document.querySelectorAll('#signin-box input'); u.value = 'mario.rossi@studenti.example.edu'; p.value = 'Segreta-123'; [...document.querySelectorAll('#signin-box button')].find(b => /Turn on|Update/.test(b.innerText)).click()`);
+      await ui.waitFor(`/on/.test(document.querySelector('#signin-box .state')?.innerText || '')`);
+      await ui.eval(`document.querySelector('#signin-box').closest('dialog').close()`);
+      await ui.waitFor(`window.nuvia.debugState().then(s => s.overlayDepth === 0)`);
+      let portal = await portalPage();
+      assert.match(await portal.waitFor(`document.querySelector('h1')?.innerText`, { timeout: 30000 }), /Inbox/);
+      await ui.waitFor(`window.nuvia.listNotifications().then(list => list.some(n => /Signed back in automatically/.test(n.body)))`, { timeout: 15000 });
+      const stored = await ui.eval(`return window.nuvia.signInGet('portal')`);
+      assert.deepEqual([stored.saved, stored.username], [true, 'mario.rossi@studenti.example.edu']);
+      assert.equal(stored.password, undefined, 'the password never goes back to the UI');
+      // The session expires: the service lands on the SSO again and Nuvia signs back in.
+      await portal.eval(`localStorage.removeItem('session'); location.reload(); return true`).catch(() => {});
+      portal.close();
+      await sleep(1500);
+      portal = await portalPage();
+      assert.match(await portal.waitFor(`document.querySelector('h1')?.innerText`, { timeout: 30000 }), /Inbox/);
+      portal.close();
+      const cookies = await ui.eval(`return window.nuvia.debugCookies('portal')`);
+      assert.deepEqual(cookies, { value: 'kept', session: true, encrypted: true });
+      await ui.eval(`await window.nuvia.signInClear('portal'); return true`);
+      assert.equal((await ui.eval(`return window.nuvia.signInGet('portal')`)).saved, false);
+      await click('[data-route="home"]');
     });
 
     await t.test('shortcuts and quick switcher', async () => {

@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('nuvia', {
   forward: invoke('services:forward'),
   removeView: invoke('services:remove-view'),
   serviceMenu: invoke('services:context-menu'),
+  signInGet: invoke('services:signin-get'),
+  signInSet: invoke('services:signin-set'),
+  signInClear: invoke('services:signin-clear'),
   onOpenService: listen('open-service'),
   onEditService: listen('service:edit'),
   onRemoveService: listen('service:remove'),
@@ -81,5 +84,6 @@ contextBridge.exposeInMainWorld('nuvia', {
   aiUsage: invoke('ai:usage'),
   debugState: invoke('debug:state'),
   debugGuard: invoke('debug:crash-guard'),
-  debugCrash: invoke('debug:crash-view')
+  debugCrash: invoke('debug:crash-view'),
+  debugCookies: invoke('debug:cookie-roundtrip')
 });

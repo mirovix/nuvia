@@ -80,5 +80,6 @@ contextBridge.exposeInMainWorld('nuvia', {
 
   aiUsage: invoke('ai:usage'),
   debugState: invoke('debug:state'),
-  debugGuard: invoke('debug:crash-guard')
+  debugGuard: invoke('debug:crash-guard'),
+  debugCrash: invoke('debug:crash-view')
 });

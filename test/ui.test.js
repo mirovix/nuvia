@@ -349,8 +349,7 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       // A service page that crashes shows a recovery screen instead of a blank view.
       await click('.service[data-id="site"]');
       await ui.waitFor(`window.nuvia.debugState().then(s => s.activeKey === 'site' && s.attached)`);
-      const site = await app.page(target => target.url.startsWith(`${base}/site`) && !target.url.includes('?2'));
-      site.send('Page.crash');
+      assert.equal(await ui.eval(`return window.nuvia.debugCrash('site')`), true);
       await ui.waitFor(`/stopped/.test(document.querySelector('#view-state').innerText)`, { timeout: 15000 });
       assert.equal((await debug()).attached, false);
       await ui.eval(`document.querySelector('#view-state .btn').click()`);

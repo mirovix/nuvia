@@ -1155,4 +1155,5 @@ handle('ai:usage', async ({ force = false } = {}) => {
 if (TEST) {
   handle('debug:state', () => ({ activeKey, overlayDepth, attached: Boolean(views.get(activeKey) && attached(views.get(activeKey))), views: [...views.keys()], hostBounds, uiExtensions: session.defaultSession.extensions.getAllExtensions().length }));
   handle('debug:crash-guard', () => readJson(paths.guard(), {}));
+  handle('debug:crash-view', key => { views.get(key)?.webContents.forcefullyCrashRenderer(); return Boolean(views.get(key)); });
 }

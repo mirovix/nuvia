@@ -62,6 +62,7 @@ test('Google sign-in uses a Firefox identity only on accounts.google.com', async
   assert.match(firefoxUserAgent('win32'), /^Mozilla\/5\.0 \(Windows NT 10\.0; Win64; x64; rv:\d+\.0\) Gecko\/20100101 Firefox\/\d+\.0$/);
   assert.match(firefoxUserAgent('darwin'), /Macintosh; Intel Mac OS X 10\.15; rv:/);
   assert.ok(isGoogleSignIn('https://accounts.google.com/v3/signin/identifier?x=1'));
+  assert.ok(isGoogleSignIn('https://accounts.google.com/ServiceLogin?service=mail'));
   assert.ok(isGoogleSignIn('https://accounts.google.com'));
   assert.ok(!isGoogleSignIn('https://mail.google.com/mail/u/0/'));
   assert.ok(!isGoogleSignIn('https://accounts.google.com.evil.example/'));

@@ -114,29 +114,51 @@ function prepareSession(serviceId) {
   return serviceSession;
 }
 
-// Requests to Google's sign-in pages go out as Firefox, without Chromium's client hints.
+// Google sign-in compatibility. Google refuses sign-in from embedded Chromium
+// but accepts Firefox, so a tab navigating Google's account pages presents
+// itself as Firefox for the whole flow (page UA and the tab's own requests,
+// client hints removed). Requests that other pages make to accounts.google.com
+// in the background (Gmail rotating its cookies) keep the Chrome identity:
+// Google signs out a session whose cookies appear from two browsers.
+// Can be turned off in Settings.
+const googleCompat = () => readJson(paths.preferences(), {}).googleSignInCompat !== false;
+
 function googleSignInHeaders(serviceSession) {
   serviceSession.webRequest.onBeforeSendHeaders({ urls: ['https://accounts.google.com/*'] }, (details, callback) => {
+    const contents = details.webContents;
+    const firefoxTab = contents && !contents.isDestroyed() && contents.getUserAgent() === firefoxUserAgent();
+    if (!googleCompat() || !firefoxTab) return callback({});
     const headers = { ...details.requestHeaders, 'User-Agent': firefoxUserAgent() };
     for (const name of Object.keys(headers)) if (/^sec-ch-ua/i.test(name)) delete headers[name];
     callback({ requestHeaders: headers });
   });
 }
 
-// The page itself must agree: switch the tab's identity while it is on
-// accounts.google.com and back to Chrome afterwards. Popups get the same.
 function followGoogleSignIn(contents) {
-  const apply = url => {
-    if (contents.isDestroyed()) return;
-    const want = isGoogleSignIn(url) ? firefoxUserAgent() : null;
-    if (want && contents.getUserAgent() !== want) contents.setUserAgent(want);
-    else if (!want && contents.getUserAgent() === firefoxUserAgent()) contents.setUserAgent(userAgent());
+  const wanted = url => (googleCompat() && isGoogleSignIn(url) ? firefoxUserAgent() : userAgent());
+  const needsSwitch = url => {
+    const current = contents.getUserAgent();
+    const want = wanted(url);
+    return (want === firefoxUserAgent()) !== (current === firefoxUserAgent()) ? want : null;
   };
+  // Switch when a navigation starts (before its request is sent)…
   contents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
-    const target = event?.url ?? url; const main = event?.isMainFrame ?? isMainFrame;
-    if (main) apply(target);
+    const target = event?.url ?? url;
+    if (!(event?.isMainFrame ?? isMainFrame) || (event?.isSameDocument ?? isInPlace) || contents.isDestroyed()) return;
+    const want = needsSwitch(target);
+    if (want) contents.setUserAgent(want);
   });
-  contents.on('will-redirect', (event, url) => apply(event?.url ?? url));
+  // …but never in the middle of a redirect chain (Chromium stalls on a blank
+  // page): cancel that redirect and start a fresh navigation with the right identity.
+  contents.on('will-redirect', (event, url, isInPlace, isMainFrame) => {
+    const target = event?.url ?? url;
+    if ((event?.isMainFrame ?? isMainFrame) === false || contents.isDestroyed()) return;
+    const want = needsSwitch(target);
+    if (!want) return;
+    event.preventDefault();
+    contents.setUserAgent(want);
+    setImmediate(() => { if (!contents.isDestroyed()) contents.loadURL(target).catch(() => {}); });
+  });
   contents.on('did-create-window', child => followGoogleSignIn(child.webContents));
 }
 

@@ -12,6 +12,7 @@ import { parseChatRow, parseMailLines, parseAgendaText, sortFeed, unreadFromTitl
 import { normalizeClaudeLimits, codexUsage, claudeUsage } from './lib/usage.js';
 import { readInfo, defaultRules } from './lib/extensions.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
+import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
 
 const { script } = pageScripts;
@@ -61,7 +62,11 @@ const services = () => readJson(paths.services(), []);
 const saveServices = items => writeJson(paths.services(), items);
 const serviceById = id => services().find(service => service.id === id);
 const partitionFor = id => `persist:nuvia-${String(id).replace(/[^a-z0-9_-]/gi, '')}`;
-const userAgent = () => `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`;
+const userAgent = () => chromeUserAgent();
+// Set as the app-wide default instead of per page: a per-page override makes
+// Chromium drop navigator.userAgentData and the Sec-CH-UA client hints, which
+// Google treats as an embedded, "not secure" browser and refuses sign-in.
+app.userAgentFallback = userAgent();
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const withTimeout = (promise, ms, fallback) => Promise.race([promise, sleep(ms).then(() => fallback)]);
 
@@ -97,13 +102,39 @@ function prepareSession(serviceId) {
   const serviceSession = session.fromPartition(partitionFor(serviceId));
   if (sessionsPrepared.has(serviceId)) return serviceSession;
   sessionsPrepared.add(serviceId);
-  serviceSession.setUserAgent(userAgent());
   const allowed = new Set(['notifications', 'media', 'fullscreen', 'clipboard-sanitized-write', 'pointerLock', 'speaker-selection', 'storage-access', 'top-level-storage-access']);
   // 'openExternal' is refused on purpose: open.spotify.com would otherwise launch the Spotify desktop app.
   serviceSession.setPermissionRequestHandler((_, permission, callback) => callback(allowed.has(permission)));
   serviceSession.setPermissionCheckHandler((_, permission) => allowed.has(permission));
+  googleSignInHeaders(serviceSession);
   if (TEST && process.env.NUVIA_FIXTURES) serveFixtures(serviceSession);
   return serviceSession;
+}
+
+// Requests to Google's sign-in pages go out as Firefox, without Chromium's client hints.
+function googleSignInHeaders(serviceSession) {
+  serviceSession.webRequest.onBeforeSendHeaders({ urls: ['https://accounts.google.com/*'] }, (details, callback) => {
+    const headers = { ...details.requestHeaders, 'User-Agent': firefoxUserAgent() };
+    for (const name of Object.keys(headers)) if (/^sec-ch-ua/i.test(name)) delete headers[name];
+    callback({ requestHeaders: headers });
+  });
+}
+
+// The page itself must agree: switch the tab's identity while it is on
+// accounts.google.com and back to Chrome afterwards. Popups get the same.
+function followGoogleSignIn(contents) {
+  const apply = url => {
+    if (contents.isDestroyed()) return;
+    const want = isGoogleSignIn(url) ? firefoxUserAgent() : null;
+    if (want && contents.getUserAgent() !== want) contents.setUserAgent(want);
+    else if (!want && contents.getUserAgent() === firefoxUserAgent()) contents.setUserAgent(userAgent());
+  };
+  contents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
+    const target = event?.url ?? url; const main = event?.isMainFrame ?? isMainFrame;
+    if (main) apply(target);
+  });
+  contents.on('will-redirect', (event, url) => apply(event?.url ?? url));
+  contents.on('did-create-window', child => followGoogleSignIn(child.webContents));
 }
 
 // Tests only: answer https requests of known hosts with local fixture pages.
@@ -125,6 +156,7 @@ function sameSite(a, b) {
 }
 
 function wireContents(contents, service, key) {
+  followGoogleSignIn(contents);
   contents.setWindowOpenHandler(({ url }) => {
     if (!/^https?:|^about:blank/i.test(url)) return { action: 'deny' };
     let host = ''; try { host = new URL(url).hostname; } catch {}
@@ -184,11 +216,10 @@ async function createServiceView(service, key = service.id, url = service.url) {
   view.setBackgroundColor('#ffffff');
   // Background views still need a real viewport: at 0x0 lazy lists (agenda, chats) render nothing.
   view.setBounds(hostBounds);
-  view.webContents.setUserAgent(userAgent());
   wireContents(view.webContents, service, key);
   if (key === service.id) trackState(view, service);
   view.webContents.once('did-finish-load', () => releaseGuard(service.id));
-  view.webContents.loadURL(url, { userAgent: userAgent() }).catch(error => log('load', service.name, error.message));
+  view.webContents.loadURL(url).catch(error => log('load', service.name, error.message));
   views.set(key, view);
   return view;
 }
@@ -220,7 +251,6 @@ async function withHiddenPage(serviceId, url, task, { settle = 2500, timeout = 2
   prepareSession(serviceId);
   const window = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: { partition: partitionFor(serviceId), sandbox: true, contextIsolation: true, backgroundThrottling: false } });
   window.webContents.setAudioMuted(true);
-  window.webContents.setUserAgent(userAgent());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   try {
     await withTimeout(window.loadURL(url).catch(() => {}), timeout);
@@ -997,7 +1027,6 @@ function iasSession() {
   const iasSessionObject = session.fromPartition(IAS.partition);
   if (!sessionsPrepared.has('ias')) {
     sessionsPrepared.add('ias');
-    iasSessionObject.setUserAgent(userAgent());
     if (TEST && process.env.NUVIA_FIXTURES) serveFixtures(iasSessionObject);
   }
   return iasSessionObject;
@@ -1037,7 +1066,6 @@ function iasPageScript(action, value) {
 async function withIasPage(task) {
   iasSession();
   const window = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { partition: IAS.partition, sandbox: true, contextIsolation: true } });
-  window.webContents.setUserAgent(userAgent());
   const contents = window.webContents;
   const load = async url => { await withTimeout(contents.loadURL(url).catch(() => {}), 20000); await waitForLoad(contents, 15000); };
   const read = () => run(contents, iasPageScript('read'), 8000, { login: false, labs: [] });

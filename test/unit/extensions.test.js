@@ -48,3 +48,21 @@ test('serviceKind and serviceGroup', () => {
   assert.equal(serviceGroup({ url: 'https://outlook.live.com/mail/0/' }), 'mail');
   assert.equal(serviceGroup({ url: 'https://example.com' }), 'web');
 });
+
+test('chromeUserAgent matches the real OS and Chrome reduced version', async () => {
+  const { chromeUserAgent } = await import('../../lib/useragent.js');
+  assert.equal(chromeUserAgent('win32', '138.0.7204.251'), 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36');
+  assert.match(chromeUserAgent('darwin', '138.0.7204.251'), /\(Macintosh; Intel Mac OS X 10_15_7\).*Chrome\/138\.0\.0\.0/);
+  assert.match(chromeUserAgent('linux', '138.0.7204.251'), /\(X11; Linux x86_64\).*Chrome\/138\.0\.0\.0/);
+  assert.doesNotMatch(chromeUserAgent(), /Electron|Nuvia/);
+});
+
+test('Google sign-in uses a Firefox identity only on accounts.google.com', async () => {
+  const { firefoxUserAgent, isGoogleSignIn } = await import('../../lib/useragent.js');
+  assert.match(firefoxUserAgent('win32'), /^Mozilla\/5\.0 \(Windows NT 10\.0; Win64; x64; rv:\d+\.0\) Gecko\/20100101 Firefox\/\d+\.0$/);
+  assert.match(firefoxUserAgent('darwin'), /Macintosh; Intel Mac OS X 10\.15; rv:/);
+  assert.ok(isGoogleSignIn('https://accounts.google.com/v3/signin/identifier?x=1'));
+  assert.ok(isGoogleSignIn('https://accounts.google.com'));
+  assert.ok(!isGoogleSignIn('https://mail.google.com/mail/u/0/'));
+  assert.ok(!isGoogleSignIn('https://accounts.google.com.evil.example/'));
+});

@@ -66,6 +66,31 @@ chmod +x Nuvia-<version>-x86_64.AppImage
 
 On Ubuntu 22.04 and later the AppImage needs `libfuse2` (`sudo apt install libfuse2`).
 
+**Any distribution, no root (`.tar.gz`)**
+
+```bash
+mkdir -p ~/.local/opt && tar -xzf Nuvia-<version>-x64.tar.gz -C ~/.local/opt && mv ~/.local/opt/Nuvia-<version>-x64 ~/.local/opt/Nuvia
+~/.local/opt/Nuvia/nuvia-desktop
+```
+
+### Updates
+
+Install once: after that Nuvia updates itself. Every few hours it checks the
+[latest release](https://github.com/mirovix/nuvia/releases/latest); when there is a
+new version it downloads it in the background, checks its SHA-256 against
+`SHA256SUMS.txt` and installs it the next time you restart Nuvia (or right away
+with **Restart now** in the top bar). The previous version is kept next to it
+(`Nuvia.old`) in case you need to go back.
+
+| Install | Updates |
+| --- | --- |
+| Windows installer, portable `.exe` | automatic |
+| macOS `.app` in Applications | automatic |
+| Linux AppImage, `.tar.gz` folder | automatic |
+| Linux `.deb` / `.rpm` | Nuvia tells you and opens the download (the system owns those files) |
+
+Turn it off in **Settings → General → Update automatically**; check by hand in **Settings → About**.
+
 ## Features
 
 - **Overview** made of widgets you can show, reorder (drag them by the handle), resize and configure one by one.
@@ -74,11 +99,12 @@ On Ubuntu 22.04 and later the AppImage needs `libfuse2` (`sudo apt install libfu
 - **Calendar**: one agenda from Google Calendar, Outlook and any iCal link.
 - **Music**: a built-in player on top of Spotify Web, with artwork, artist, album, progress, volume, library and search. It never opens the Spotify app.
 - **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) sign back in by themselves after you log in once; you get a notification when a second factor is needed.
-- **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed.
+- **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed. Map tiles are cached on disk and fetched as OpenStreetMap's tile policy asks, with backup map servers if one refuses.
 - **Claude & Codex**: how much of the 5-hour and weekly limits you've used, when they reset, and how many tokens you've spent.
 - **Notifications** panel, **weather**, Italian **trains** (ViaggiaTreno, with delay alerts) and **Notion** shortcuts.
 - Chrome Web Store **extensions**, enabled per service.
 - Dark, light or system theme, seven accent colours, backgrounds and a compact sidebar.
+- **Time zone**: pick the one you are in (Settings → General); the clock, calendar, mail and message times follow it at once.
 - Shortcuts: `Ctrl/⌘+1…9` services, `Ctrl/⌘+0` overview, `Ctrl/⌘+K` go to…, `Ctrl/⌘+R` reload, `Ctrl/⌘+,` settings.
 
 | | |

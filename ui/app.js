@@ -11,6 +11,7 @@ import { initWidgets, refreshWeather, watchFavoriteTrains, refreshBoard, refresh
 import { initNotifications, refreshNotifications } from './notifications.js';
 import { initAi, refreshUsage } from './ai.js';
 import { initSettings, applyAppearance, loadExtensions } from './settings.js';
+import { initUpdates } from './updates.js';
 
 const every = (ms, fn) => setInterval(() => { if (!document.hidden) fn(); }, ms);
 
@@ -103,6 +104,7 @@ async function init() {
   });
   // Entry points normally reached from native context menus (used by the UI tests).
   window.__nuviaDebug = { openEditService, removeService, state };
+  await initUpdates().catch(error => console.error('updates', error));
   window.__nuviaReady = true;
 }
 

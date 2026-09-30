@@ -627,3 +627,9 @@ body[data-platform='darwin'].sidebar-collapsed .brand { padding: 30px 0 0; }
 .signin-box { margin-top: 8px; padding: 14px 16px; border-radius: 14px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
 .signin-box h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; display: flex; align-items: center; }
 .signin-box p { margin: 0 0 10px; font-size: 12.5px; }
+
+/* Update banner (ui/updates.js) */
+.update-banner { display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; margin-right: 6px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--accent); font-size: 12.5px; max-width: 460px; min-width: 0; -webkit-app-region: no-drag; }
+.update-banner > svg { color: var(--accent); flex-shrink: 0; }
+.update-banner span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.update-banner[hidden] { display: none; }

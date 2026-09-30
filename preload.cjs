@@ -82,6 +82,10 @@ contextBridge.exposeInMainWorld('nuvia', {
   onNotificationsChanged: listen('notifications:changed'),
 
   aiUsage: invoke('ai:usage'),
+  updateState: invoke('update:get'),
+  checkForUpdates: invoke('update:check'),
+  restartToUpdate: invoke('update:restart'),
+  onUpdate: listen('update:state'),
   debugState: invoke('debug:state'),
   debugGuard: invoke('debug:crash-guard'),
   debugCrash: invoke('debug:crash-view'),

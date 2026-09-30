@@ -1,5 +1,6 @@
-import { api, state, $, h, icon, fill, emit, on, sheet, openModal, toast, savePrefs, segmented, toggle, confirmDialog, hostOf } from './core.js';
+import { api, state, $, h, icon, fill, emit, on, sheet, openModal, toast, savePrefs, flushPrefs, segmented, toggle, confirmDialog, hostOf } from './core.js';
 import { favicon } from './services.js';
+import { updateSection } from './updates.js';
 
 const ACCENTS = { blue: '#3d6bff', coral: '#ff6a3d', lime: '#c6ee45', cobalt: '#5d7dff', mint: '#3ccf9f', lilac: '#b497ff', amber: '#ffb21f' };
 const LEGACY_BACKGROUNDS = ['aurora', 'sonoma', 'ocean', 'midnight', 'peach'];
@@ -41,14 +42,29 @@ function generalTab() {
   const name = h('input', { value: prefs.name || '', placeholder: 'What should we call you?', on: { change: () => { prefs.name = name.value.trim(); savePrefs(); emit('hero'); } } });
   const city = h('input#city-input', { value: prefs.city || '', placeholder: 'e.g. Padua' });
   const saveCity = h('button.btn.sm#save-city', { type: 'button', on: { click: () => { prefs.city = city.value.trim() || 'Roma'; savePrefs(); emit('refresh-weather'); toast(`Weather set to ${prefs.city}`); } } }, 'Save');
+  const systemZone = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+  const zoneLabel = zone => { try { const offset = new Intl.DateTimeFormat('en-GB', { timeZone: zone, timeZoneName: 'shortOffset' }).formatToParts(new Date()).find(part => part.type === 'timeZoneName')?.value || ''; return `${zone.replace(/_/g, ' ')} (${offset.replace('GMT', 'UTC')})`; } catch { return zone; } };
+  const zone = h('select#timezone', { on: { change: async () => {
+    prefs.timeZone = zone.value;
+    await flushPrefs();
+    emit('hero');
+    toast(zone.value ? `Times now shown for ${zone.value.replace(/_/g, ' ')}` : 'Times follow the system time zone');
+  } } },
+    h('option', { value: '' }, `Automatic${prefs.timeZone ? '' : ` (${systemZone.replace(/_/g, ' ')})`}`),
+    zones.map(item => h('option', { value: item }, zoneLabel(item))));
+  zone.value = prefs.timeZone || '';
   return [
     h('label.field', h('span', 'Name'), name, h('small', 'Only used for the greeting on the Overview.')),
+    h('label.field', h('span', 'Time zone'), zone, h('small', 'The clock, calendar, mail and message times all follow it. Automatic uses the computer’s time zone.')),
     h('div.field', h('span', 'Weather city'), h('div.inline', city, saveCity)),
     h('label.check', toggle(prefs.rememberSignIns !== false, value => { prefs.rememberSignIns = value; savePrefs(); }), 'Stay signed in automatically'),
     h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'When you sign in to a service, Nuvia keeps your details encrypted in the system keychain and signs you back in when the session expires (for example a university account). Remove them per service in Edit service.'),
     h('label.check', toggle(prefs.googleSignInCompat !== false, value => { prefs.googleSignInCompat = value; savePrefs(); }), 'Google sign-in compatibility'),
     h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'Lets you sign in to Google accounts when Google says the browser may not be secure. Turn it off if a Google account keeps signing you out.'),
-    h('label.check', toggle(prefs.systemNotifications !== false, value => { prefs.systemNotifications = value; savePrefs(); }), 'Also show notifications on the desktop')
+    h('label.check', toggle(prefs.systemNotifications !== false, value => { prefs.systemNotifications = value; savePrefs(); }), 'Also show notifications on the desktop'),
+    h('label.check', toggle(prefs.autoUpdate !== false, value => { prefs.autoUpdate = value; savePrefs(); }), 'Update automatically'),
+    h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'When a fix is published, Nuvia downloads it in the background and installs it at the next restart.')
   ];
 }
 
@@ -91,6 +107,7 @@ function integrationsTab() {
 
 function aboutTab() {
   return [
+    updateSection(),
     h('p.dim', 'Each service has its own persistent Chromium profile, so cookies and logins stay on this computer. Nuvia never reads or copies your passwords.'),
     h('p.dim', 'Extensions are never loaded into Nuvia’s own interface, only into the services where you turn them on. If an extension crashes a service or the app, it’s turned off there and you get a notice.'),
     h('p.dim', 'Shortcuts: Ctrl+1…9 services · Ctrl+0 overview · Ctrl+K go to… · Ctrl+R reload · Ctrl+, settings.')

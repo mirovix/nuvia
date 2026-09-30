@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { launch, writeProfile, sleep, project } from './helpers.js';
 
 const pad = n => String(n).padStart(2, '0');
@@ -62,8 +64,11 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
   const server = await mockServer();
   const base = `http://127.0.0.1:${server.address().port}`;
   const now = Date.now();
+  // A newer release "on GitHub": the app must notice it on its own.
+  const releaseFile = join(tmpdir(), `nuvia-release-${process.pid}.json`);
+  writeFileSync(releaseFile, JSON.stringify({ tag_name: 'v99.0.0', html_url: 'https://github.com/mirovix/nuvia/releases/tag/v99.0.0', body: 'Fixes', assets: [{ name: 'Nuvia-99.0.0-x64.tar.gz', browser_download_url: 'https://example.invalid/x.tar.gz', size: 1 }] }));
   const app = await launch({
-    env: { NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
+    env: { NUVIA_UPDATE_URL: pathToFileURL(releaseFile).href, NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
     prepare: profile => {
       const fixtures = join(profile, 'fixtures');
       cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
@@ -247,6 +252,9 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       await ui.eval(`document.querySelector('.route-form .suggest .suggestions button').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`);
       await ui.eval(`const b = document.querySelectorAll('.route-form .suggest input')[1]; b.value = 'Corso Palladio 98'; b.dispatchEvent(new Event('input', { bubbles: true })); const city = document.querySelector('.route-form > input'); city.value = 'Vicenza'; city.dispatchEvent(new Event('change')); document.querySelector('.route-form .btn.accent').click()`);
       await ui.waitFor(`document.querySelectorAll('.widget[data-widget="commute"] .leaflet-marker-icon').length === 2`, { timeout: 20000 });
+      // Tiles come from the main process (identified + cached), never straight from the page.
+      await ui.waitFor(`[...document.querySelectorAll('.widget[data-widget="commute"] img.leaflet-tile')].some(img => img.src.startsWith('nuvia-tile://') && img.complete && img.naturalWidth === 256)`, { timeout: 30000 });
+      assert.equal(await ui.eval(`return [...document.querySelectorAll('img.leaflet-tile')].filter(img => !img.src.startsWith('nuvia-tile://')).length`), 0);
       const result = await ui.eval(`return { summary: document.querySelector('.route-summary').innerText, ends: document.querySelector('.route-ends').innerText, steps: document.querySelectorAll('.route-steps .step').length, path: document.querySelectorAll('.widget[data-widget="commute"] path.leaflet-interactive').length }`);
       assert.match(result.summary, /35\s*min/);
       assert.match(result.summary, /37\.8 km/);
@@ -425,6 +433,23 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       await click('[data-route="home"]');
     });
 
+    await t.test('updates: a new release is noticed and offered, with a manual check in About', async () => {
+      await ui.waitFor(`!document.querySelector('#update-banner').hidden && /99\\.0\\.0 is available/.test(document.querySelector('#update-banner').innerText)`, { timeout: 20000 });
+      assert.ok(await ui.eval(`return Boolean(document.querySelector('#update-download'))`), 'a development build offers the download instead of installing');
+      await click('#open-settings');
+      await ui.waitFor(`document.querySelector('#settings-dialog[open]')`);
+      await ui.eval(`document.querySelector('#settings-dialog .tabs [data-tab="about"]').click()`);
+      await ui.waitFor(`/99\\.0\\.0/.test(document.querySelector('#update-status')?.innerText)`);
+      await ui.eval(`document.querySelector('#check-updates').click()`);
+      await ui.waitFor(`/99\\.0\\.0 is available/.test(document.querySelector('#update-status').innerText)`);
+      await ui.eval(`document.querySelector('#settings-dialog .tabs [data-tab="general"]').click()`);
+      assert.match(await text('#settings-dialog .sheet-body'), /Update automatically/);
+      await ui.eval(`document.querySelector('#update-banner .icon-btn').click()`);
+      await ui.waitFor(`document.querySelector('#update-banner').hidden`);
+      await ui.eval(`document.querySelector('#settings-dialog').close()`);
+      await sleep(300);
+    });
+
     await t.test('settings: theme, accent, background, name, city, compact sidebar', async () => {
       await click('#open-settings');
       await ui.waitFor(`document.querySelector('#settings-dialog[open]')`);
@@ -439,6 +464,14 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       await ui.eval(`document.querySelector('#settings-dialog .tabs [data-tab="general"]').click()`);
       await ui.eval(`const name = document.querySelector('#settings-dialog .field input'); name.value = 'Miro'; name.dispatchEvent(new Event('change')); document.querySelector('#city-input').value = 'Vicenza'; document.querySelector('#save-city').click()`);
       await ui.waitFor(`/Miro/.test(document.querySelector('#hello').innerText)`);
+      // Time zone: the whole UI follows it without a restart, and Automatic goes back.
+      await ui.eval(`const z = document.querySelector('#timezone'); z.value = 'Asia/Tokyo'; z.dispatchEvent(new Event('change'))`);
+      await ui.waitFor(`new Date().getTimezoneOffset() === -540`);
+      const tokyoHour = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tokyo', hour: '2-digit', hourCycle: 'h23' }).format(new Date());
+      await ui.waitFor(`document.querySelector('#clock').innerText.startsWith(${JSON.stringify(tokyoHour)})`);
+      assert.equal((await ui.eval('return window.nuvia.getPreferences()')).timeZone, 'Asia/Tokyo');
+      await ui.eval(`const z = document.querySelector('#timezone'); z.value = ''; z.dispatchEvent(new Event('change'))`);
+      await ui.waitFor(`new Date().getTimezoneOffset() === ${new Date().getTimezoneOffset()}`);
       await ui.eval(`document.querySelector('#settings-dialog .tabs [data-tab="about"]').click()`);
       assert.match(await text('#settings-dialog .sheet-body'), /Ctrl\+K/);
       await ui.eval(`document.querySelector('#settings-dialog').close()`);

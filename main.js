@@ -1,6 +1,6 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components, safeStorage } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components, safeStorage, protocol } from 'electron';
 import { join, extname, resolve, sep, dirname } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync, accessSync, constants as fsConstants } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { homedir, userInfo } from 'node:os';
 import { Worker } from 'node:worker_threads';
@@ -15,6 +15,9 @@ import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
 import { fillSignIn, isSignInUrl } from './lib/autologin.js';
+import { createTileSource, parseTileUrl } from './lib/tiles.js';
+import { CHECK_EVERY_MS, checkRelease, installKind, installPaths, parseSums } from './lib/updater.js';
+import { apply as applyStaged, download, prepare as prepareUpdate } from './lib/update-install.js';
 
 const { script } = pageScripts;
 const TEST = process.env.NUVIA_TEST === '1';
@@ -75,7 +78,28 @@ const withTimeout = (promise, ms, fallback) => Promise.race([promise, sleep(ms).
 
 const defaultName = () => { const name = userInfo().username || ''; return name ? name[0].toUpperCase() + name.slice(1) : ''; };
 function preferences() { return { theme: 'dark', accent: 'blue', background: 'plain', city: 'Roma', name: defaultName(), ...readJson(paths.preferences(), {}) }; }
-function savePreferences(value) { writeJson(paths.preferences(), value); return value; }
+function savePreferences(value) { writeJson(paths.preferences(), value); applyTimeZone(); return value; }
+
+// Time zone picked in Settings → General (empty = the system's). The UI gets it through
+// the DevTools timezone override, so every clock and date follows it at once, no restart.
+const SYSTEM_TZ = process.env.TZ;
+let appliedZone = null;
+function validTimeZone(zone) {
+  if (typeof zone !== 'string' || !zone) return '';
+  try { new Intl.DateTimeFormat('en-GB', { timeZone: zone }); return zone; } catch { return ''; }
+}
+function applyTimeZone() {
+  const zone = validTimeZone(readJson(paths.preferences(), {}).timeZone);
+  if (!mainWindow || mainWindow.isDestroyed() || zone === appliedZone) return;
+  appliedZone = zone;
+  // The main process formats times too (notifications, train alerts).
+  if (zone) process.env.TZ = zone; else if (SYSTEM_TZ === undefined) delete process.env.TZ; else process.env.TZ = SYSTEM_TZ;
+  const tools = mainWindow.webContents.debugger;
+  try {
+    if (!tools.isAttached()) tools.attach('1.3');
+    tools.sendCommand('Emulation.setTimezoneOverride', { timezoneId: zone }).catch(error => log('timezone', error.message));
+  } catch (error) { log('timezone', error.message); }
+}
 
 let mainWindow;
 let activeKey = null;
@@ -592,6 +616,7 @@ function createWindow() {
     ...(IS_MAC ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 18, y: 20 } } : { frame: false }),
     webPreferences: { preload: join(import.meta.dirname, 'preload.cjs'), contextIsolation: true, sandbox: true }
   });
+  applyTimeZone();
   mainWindow.loadFile('index.html');
   mainWindow.once('ready-to-show', () => mainWindow.show());
   if (TEST) mainWindow.show();
@@ -614,6 +639,19 @@ function migrate() {
   writeJson(paths.preferences(), { ...prefs, migrations: [...done] });
 }
 
+// Map tiles come through the main process (see lib/tiles.js).
+protocol.registerSchemesAsPrivileged([{ scheme: 'nuvia-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
+
+function serveMapTiles() {
+  // Node's fetch: Chromium's net.fetch refuses a Referer header set by hand.
+  const tile = createTileSource({ cacheDir: fileInProfile('map-tiles'), userAgent: `Nuvia/${app.getVersion()} (+https://github.com/mirovix/nuvia)` });
+  protocol.handle('nuvia-tile', async request => {
+    const where = parseTileUrl(request.url);
+    const bytes = where && await tile(where);
+    return bytes ? new Response(bytes, { headers: { 'Content-Type': bytes[0] === 0xff ? 'image/jpeg' : 'image/png', 'Cache-Control': 'max-age=86400' } }) : new Response(null, { status: 404 });
+  });
+}
+
 if (!TEST && !app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
 
@@ -622,7 +660,9 @@ app.whenReady().then(async () => {
   try { await components.whenReady(); } catch {}
   migrate();
   recoverFromCrash();
+  serveMapTiles();
   createWindow();
+  scheduleUpdateChecks();
   // Mail and chat views run in the background so counters and previews stay live.
   let delay = 0;
   for (const service of services().filter(item => ['mail', 'message'].includes(serviceGroup(item)))) {
@@ -646,6 +686,86 @@ app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWi
 // IPC: shell, services, overlay
 
 const handle = (channel, fn) => ipcMain.handle(channel, async (_, ...args) => fn(...args));
+
+// ---------------------------------------------------------------------------
+// Automatic updates (lib/updater.js). When a fix is released on GitHub, every
+// installed Nuvia downloads it in the background, checks its SHA-256 and installs
+// it on the next restart (or right away with "Restart now").
+
+const updater = { state: 'idle', version: null, page: null, progress: 0, error: null, kind: installKind(), staged: null };
+const updaterApi = process.env.NUVIA_UPDATE_URL || undefined; // tests: a local release file
+const publicUpdate = () => ({ state: updater.state, version: updater.version, page: updater.page, progress: updater.progress, error: updater.error, kind: updater.kind, current: app.getVersion(), auto: preferences().autoUpdate !== false });
+const setUpdate = patch => { Object.assign(updater, patch); notifyRenderer('update:state', publicUpdate()); };
+// Tests hand in file:// release descriptions; Node's fetch cannot read those.
+const updateFetch = (url, options) => (String(url).startsWith('file:') ? Promise.resolve(new Response(readFileSync(new URL(url)))) : fetch(url, options));
+
+function canReplace(target) {
+  if (!target) return false;
+  try { accessSync(dirname(target), fsConstants.W_OK); return true; } catch { return false; }
+}
+
+async function checkForUpdates({ manual = false } = {}) {
+  if (['checking', 'downloading', 'ready'].includes(updater.state)) return publicUpdate();
+  setUpdate({ state: 'checking', error: null });
+  try {
+    const found = await checkRelease({ current: app.getVersion(), kind: updater.kind, arch: process.arch, fetchImpl: updateFetch, api: updaterApi });
+    if (!found) { setUpdate({ state: 'current' }); return publicUpdate(); }
+    const { target, launcher } = installPaths(updater.kind);
+    setUpdate({ version: found.version, page: found.page });
+    // Development builds, .deb/.rpm and read-only installs: offer the download instead.
+    if (!app.isPackaged || !found.asset || !canReplace(target)) {
+      setUpdate({ state: 'available' });
+      if (!manual) addNotification({ title: `Nuvia ${found.version} is available`, body: 'Open Settings → About to download it.' });
+      return publicUpdate();
+    }
+    setUpdate({ state: 'downloading', progress: 0 });
+    const file = join(fileInProfile('updates'), found.asset.name);
+    const hash = await download(found.asset.url, file, { fetchImpl: updateFetch, userAgent: `Nuvia/${app.getVersion()}`, onProgress: progress => { if (progress - updater.progress >= 0.05 || progress === 1) setUpdate({ progress }); } });
+    if (found.sums) {
+      const expected = parseSums(await (await updateFetch(found.sums.url)).text())[found.asset.name];
+      if (expected && expected !== hash) { rmSync(file, { force: true }); throw new Error('The download is damaged (checksum mismatch). It will be retried later.'); }
+    }
+    const staged = prepareUpdate(updater.kind, { file, target });
+    setUpdate({ state: 'ready', staged: { ...staged, target, launcher } });
+    addNotification({ title: `Nuvia ${found.version} is ready`, body: 'It installs when you restart Nuvia. Restart now from the banner at the top.' });
+  } catch (error) {
+    log('update', error.message);
+    setUpdate({ state: 'error', error: error.message });
+  }
+  return publicUpdate();
+}
+
+function installUpdate({ relaunch }) {
+  if (updater.state !== 'ready' || !updater.staged) return false;
+  try {
+    const result = applyStaged(updater.kind, { ...updater.staged, relaunch });
+    updater.state = 'installed';
+    if (relaunch && result.relaunch) app.relaunch({ execPath: result.relaunch, args: process.argv.slice(1).filter(arg => !arg.startsWith('--updated')) });
+    return true;
+  } catch (error) {
+    log('update', 'install failed', error.message);
+    setUpdate({ state: 'error', error: `Could not install the update: ${error.message}` });
+    return false;
+  }
+}
+
+handle('update:get', () => publicUpdate());
+handle('update:check', () => checkForUpdates({ manual: true }));
+handle('update:restart', () => {
+  if (!installUpdate({ relaunch: true })) return false;
+  cookiesSaved = false;
+  setTimeout(() => app.quit(), 50);
+  return true;
+});
+// Quitting normally with an update downloaded: install it, the next start is the new version.
+app.on('will-quit', () => { if (updater.state === 'ready' && preferences().autoUpdate !== false) installUpdate({ relaunch: false }); });
+function scheduleUpdateChecks() {
+  if (TEST && !updaterApi) return;
+  const tick = () => { if (preferences().autoUpdate !== false) checkForUpdates(); };
+  setTimeout(tick, TEST ? 1500 : 20000);
+  setInterval(tick, CHECK_EVERY_MS).unref?.();
+}
+
 
 handle('window:minimize', () => mainWindow.minimize());
 handle('window:maximize', () => (mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()));

@@ -14,7 +14,8 @@ function stepIcon(step) {
   return TURN_ICON[step.modifier] || 'arrow-up';
 }
 
-const TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+// Served by the main process: identified requests, disk cache, fallback servers.
+const TILES = 'nuvia-tile://t/{z}/{x}/{y}.png';
 
 function pin(letter) {
   return L.divIcon({ className: '', html: `<div class="map-pin${letter === 'B' ? ' b' : ''}"><b>${letter}</b></div>`, iconSize: [28, 28], iconAnchor: [4, 28] });
@@ -84,7 +85,7 @@ function ensureMap(container) {
   if (ui.map) { ui.map.remove(); ui.map = null; }
   ui.map = L.map(container, { zoomControl: false, attributionControl: true, scrollWheelZoom: 'center' }).setView([45.44, 11.9], 10);
   L.control.zoom({ position: 'topright' }).addTo(ui.map);
-  ui.tiles = L.tileLayer(TILES, { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(ui.map);
+  ui.tiles = L.tileLayer(TILES, { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(ui.map);
   new ResizeObserver(() => ui.map?.invalidateSize()).observe(container);
   return ui.map;
 }

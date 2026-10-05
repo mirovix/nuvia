@@ -633,3 +633,9 @@ body[data-platform='darwin'].sidebar-collapsed .brand { padding: 30px 0 0; }
 .update-banner > svg { color: var(--accent); flex-shrink: 0; }
 .update-banner span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .update-banner[hidden] { display: none; }
+
+/* Live traffic on the commute summary (ui/commute.js) */
+.route-summary .traffic { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-weight: 600; background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.route-summary .traffic svg.i { width: 13px; height: 13px; }
+.route-summary .traffic.slow { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.route-summary .traffic.heavy { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }

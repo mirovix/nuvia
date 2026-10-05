@@ -16,6 +16,7 @@ import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/userage
 import * as pageScripts from './lib/scripts.js';
 import { fillSignIn, isSignInUrl } from './lib/autologin.js';
 import { createTileSource, parseTileUrl } from './lib/tiles.js';
+import { createTrafficSource, trafficLevel } from './lib/traffic.js';
 import { CHECK_EVERY_MS, checkRelease, installKind, installPaths, parseSums } from './lib/updater.js';
 import { apply as applyStaged, download, prepare as prepareUpdate } from './lib/update-install.js';
 
@@ -129,7 +130,7 @@ function prepareSession(serviceId) {
   const serviceSession = session.fromPartition(partitionFor(serviceId));
   if (sessionsPrepared.has(serviceId)) return serviceSession;
   sessionsPrepared.add(serviceId);
-  const allowed = new Set(['notifications', 'media', 'fullscreen', 'clipboard-sanitized-write', 'pointerLock', 'speaker-selection', 'storage-access', 'top-level-storage-access']);
+  const allowed = new Set(['notifications', 'media', 'display-capture', 'fullscreen', 'clipboard-sanitized-write', 'pointerLock', 'speaker-selection', 'storage-access', 'top-level-storage-access']);
   // 'openExternal' is refused on purpose: open.spotify.com would otherwise launch the Spotify desktop app.
   serviceSession.setPermissionRequestHandler((_, permission, callback) => callback(allowed.has(permission)));
   serviceSession.setPermissionCheckHandler((_, permission) => allowed.has(permission));
@@ -199,9 +200,16 @@ function serveFixtures(serviceSession) {
   });
 }
 
-const AUTH_HOSTS =/(^|\.)(accounts\.google\.com|login\.microsoftonline\.com|login\.live\.com|appleid\.apple\.com|accounts\.spotify\.com|github\.com|slack\.com|notion\.so|claude\.ai|auth\.openai\.com|chatgpt\.com)$/;
+const AUTH_HOSTS =/(^|\.)(accounts\.google\.com|login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com|account\.microsoft\.com|office\.com|officeapps\.live\.com|microsoft365\.com|teams\.microsoft\.com|teams\.live\.com|teams\.cloud\.microsoft|teams\.microsoft365\.com|teams\.office\.com|teams\.skype\.com|skypeforbusiness\.com|sfbassets\.com|appleid\.apple\.com|accounts\.spotify\.com|github\.com|slack\.com|notion\.so|claude\.ai|auth\.openai\.com|chatgpt\.com)$/;
+const MICROSOFT_SERVICE = /(^|\.)(microsoft\.com|microsoftonline\.com|microsoft365\.com|office\.com|officeapps\.live\.com|live\.com|cloud\.microsoft|teams\.skype\.com|skypeforbusiness\.com|sfbassets\.com)$/;
 function sameSite(a, b) {
   try { const root = host => new URL(host).hostname.split('.').slice(-2).join('.'); return root(a) === root(b); } catch { return false; }
+}
+function sameServiceFamily(target, source) {
+  try {
+    const targetHost = new URL(target).hostname; const sourceHost = new URL(source).hostname;
+    return MICROSOFT_SERVICE.test(targetHost) && MICROSOFT_SERVICE.test(sourceHost);
+  } catch { return false; }
 }
 
 function wireContents(contents, service, key) {
@@ -209,8 +217,8 @@ function wireContents(contents, service, key) {
   contents.setWindowOpenHandler(({ url }) => {
     if (!/^https?:|^about:blank/i.test(url)) return { action: 'deny' };
     let host = ''; try { host = new URL(url).hostname; } catch {}
-    if (url.startsWith('about:blank') || AUTH_HOSTS.test(host) || sameSite(url, service.url)) {
-      return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 760, autoHideMenuBar: true, backgroundColor: '#ffffff', webPreferences: { partition: partitionFor(service.id), sandbox: true, contextIsolation: true } } };
+    if (url.startsWith('about:blank') || AUTH_HOSTS.test(host) || sameSite(url, service.url) || sameServiceFamily(url, service.url)) {
+      return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 760, autoHideMenuBar: true, backgroundColor: '#ffffff', webPreferences: { partition: partitionFor(service.id), preload: join(import.meta.dirname, 'preload-service.cjs'), sandbox: true, contextIsolation: true } } };
     }
     shell.openExternal(url);
     return { action: 'deny' };
@@ -1161,6 +1169,13 @@ async function locateByIp() {
   }
   return null;
 }
+// Live traffic, only when a key is configured (see lib/traffic.js).
+const liveTraffic = createTrafficSource({
+  fetchImpl: (url, options) => net.fetch(url, options),
+  baseUrl: process.env.NUVIA_TRAFFIC_URL || undefined,
+  onError: error => log('traffic', error.message)
+});
+
 const geocodeOptions = { baseUrl: NOMINATIM, fetchImpl: (url, options) => net.fetch(url, options), userAgent: 'Nuvia/0.6 (desktop dashboard; https://github.com/)' };
 
 handle('places:suggest', async (text, city) => (String(text || '').trim().length < 4 ? [] : geocode(text, { ...geocodeOptions, cityHint: city || '' })));
@@ -1190,7 +1205,11 @@ handle('commute:route', async ({ origin, destination, city, mode = 'car', coordi
     try { summary = summarizeRoute(await (await net.fetch(`https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson&steps=true`)).json()); } catch {}
   }
   if (!summary) throw new Error('Route unavailable right now');
-  return { ...summary, mode: profile, origin: start, destination: end, originChoices: originChoices.slice(0, 4), destinationChoices: destinationChoices.slice(0, 4), arrival: Date.now() + summary.minutes * 60000 };
+  // The map and the directions stay OSRM's; traffic only adds the live delay on top.
+  const live = await liveTraffic(String(preferences().trafficKey || '').trim(), start, end, profile);
+  const traffic = live ? { ...live, freeMinutes: summary.minutes, level: trafficLevel({ delayMinutes: live.delayMinutes, freeMinutes: summary.minutes }) } : null;
+  const minutes = traffic ? summary.minutes + traffic.delayMinutes : summary.minutes;
+  return { ...summary, minutes, traffic, mode: profile, origin: start, destination: end, originChoices: originChoices.slice(0, 4), destinationChoices: destinationChoices.slice(0, 4), arrival: Date.now() + minutes * 60000 };
 });
 
 // ---------------------------------------------------------------------------

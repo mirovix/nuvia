@@ -95,11 +95,12 @@ Turn it off in **Settings → General → Update automatically**; check by hand 
 
 - **Overview** made of widgets you can show, reorder (drag them by the handle), resize and configure one by one.
 - **Mail**: previews of new Gmail and Outlook messages; one click opens the thread.
-- **Messages**: WhatsApp, Telegram and Mattermost in a single timeline that reads like one chat, with quick replies.
+- **Messages**: WhatsApp, Telegram, Mattermost and Microsoft Teams in a single timeline that reads like one chat, with quick replies. Teams keeps its Microsoft sign-in inside Nuvia and can share your screen.
 - **Calendar**: one agenda from Google Calendar, Outlook and any iCal link.
 - **Music**: a built-in player on top of Spotify Web, with artwork, artist, album, progress, volume, library and search. It never opens the Spotify app.
 - **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) sign back in by themselves after you log in once; you get a notification when a second factor is needed.
 - **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed. Map tiles are cached on disk and fetched as OpenStreetMap's tile policy asks, with backup map servers if one refuses.
+- **Live traffic** (optional): add a free TomTom key in Settings → Integrations and the commute shows the real delay and arrival time instead of free-flow. Without a key Nuvia says nothing about traffic rather than guessing.
 - **Claude & Codex**: how much of the 5-hour and weekly limits you've used, when they reset, and how many tokens you've spent.
 - **Notifications** panel, **weather**, Italian **trains** (ViaggiaTreno, with delay alerts) and **Notion** shortcuts.
 - Chrome Web Store **extensions**, enabled per service.

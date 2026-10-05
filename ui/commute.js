@@ -1,5 +1,6 @@
 import { api, state, $, h, icon, fill, on, savePrefs, segmented, clock, empty } from './core.js';
 import { defineWidget } from './home.js';
+import { describeTraffic } from '../lib/traffic.js';
 
 const MODES = [{ value: 'car', icon: 'car', title: 'Car' }, { value: 'bike', icon: 'bike', title: 'Bike' }, { value: 'foot', icon: 'footprints', title: 'Walk' }];
 const TURN_ICON = { left: 'corner-up-left', right: 'corner-up-right', 'sharp left': 'corner-up-left', 'sharp right': 'corner-up-right', 'slight left': 'arrow-up-left', 'slight right': 'arrow-up-right', straight: 'arrow-up', uturn: 'undo-2' };
@@ -121,8 +122,12 @@ function renderResult(ctx) {
   if (ui.error) { fill(summary, h('div.sub', { style: 'color:var(--danger)' }, ui.error)); fill(steps, empty('triangle-alert', 'Route unavailable', ui.error)); fill(alternatives); return; }
   if (!route) return;
   const modeLabel = MODES.find(mode => mode.value === route.mode)?.title || '';
-  ctx.setMeta(`${route.minutes} min · ${route.kilometers.toLocaleString('en-GB')} km · ${modeLabel.toLowerCase()}`);
-  fill(summary, h('div.big', String(route.minutes), h('small', 'min')), h('div.sub', `${route.kilometers.toLocaleString('en-GB')} km · arrive at ${clock(route.arrival)} · no live traffic`));
+  const traffic = describeTraffic(route.traffic);
+  ctx.setMeta([`${route.minutes} min`, `${route.kilometers.toLocaleString('en-GB')} km`, modeLabel.toLowerCase(), traffic].filter(Boolean).join(' · '));
+  fill(summary,
+    h('div.big', String(route.minutes), h('small', 'min')),
+    h('div.sub', `${route.kilometers.toLocaleString('en-GB')} km · arrive at ${clock(route.arrival)}`,
+      traffic ? h(`span.traffic.${route.traffic.level}`, icon(route.traffic.level === 'clear' ? 'check' : 'triangle-alert'), traffic) : null));
   fill(steps,
     h('div.route-ends', h('div', h('b', 'A'), h('span', { title: route.origin.full || route.origin.label }, route.origin.label)), h('div', h('b', 'B'), h('span', { title: route.destination.full || route.destination.label }, route.destination.label))),
     route.steps.map(step => h('div.step', h('span.turn', icon(stepIcon(step))), h('span', step.text), h('small', step.type === 'arrive' ? '' : step.distance))));
@@ -161,6 +166,8 @@ defineWidget({
   mount(ctx) {
     ctx.render = rebuild => { try { this.render(ctx, rebuild); } catch (error) { console.error(error); } };
     if (!ui.route && (state.prefs.homeDestination || state.prefs.homeDestinationPlace)) compute(ctx);
+    // Adding or removing the traffic key recalculates right away.
+    on('refresh-commute', () => { if (ctx.el.isConnected) compute(ctx); });
     clearInterval(ui.timer);
     ui.timer = setInterval(() => { if (ctx.el.isConnected && state.route === 'home') compute(ctx); }, 10 * 60000);
   }

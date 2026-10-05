@@ -34,6 +34,11 @@ function mockServer() {
         { distance: 30000, name: 'A4', maneuver: { type: 'on ramp', modifier: 'slight left' } },
         { distance: 0, name: '', maneuver: { type: 'arrive' } }] }] }] });
     }
+    // TomTom-shaped live traffic: 35 min free-flow, 44 min now.
+    if (url.pathname.startsWith('/routing/1/calculateRoute/')) {
+      if (url.searchParams.get('key') !== 'TEST-TRAFFIC-KEY') { response.writeHead(403); return response.end('{}'); }
+      return send({ routes: [{ summary: { travelTimeInSeconds: 2640, noTrafficTravelTimeInSeconds: 2100, trafficDelayInSeconds: 540, lengthInMeters: 37800 } }] });
+    }
     if (url.pathname === '/cal.ics') {
       const start = new Date(); start.setHours(12, 0, 0, 0);
       const end = new Date(start); end.setHours(13);
@@ -68,7 +73,7 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
   const releaseFile = join(tmpdir(), `nuvia-release-${process.pid}.json`);
   writeFileSync(releaseFile, JSON.stringify({ tag_name: 'v99.0.0', html_url: 'https://github.com/mirovix/nuvia/releases/tag/v99.0.0', body: 'Fixes', assets: [{ name: 'Nuvia-99.0.0-x64.tar.gz', browser_download_url: 'https://example.invalid/x.tar.gz', size: 1 }] }));
   const app = await launch({
-    env: { NUVIA_UPDATE_URL: pathToFileURL(releaseFile).href, NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
+    env: { NUVIA_UPDATE_URL: pathToFileURL(releaseFile).href, NUVIA_TRAFFIC_URL: base, NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
     prepare: profile => {
       const fixtures = join(profile, 'fixtures');
       cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
@@ -265,8 +270,25 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       assert.match(await text('.route-steps'), /Turn right onto Via San Massimo/);
       const prefs = await ui.eval('return window.nuvia.getPreferences()');
       assert.equal(prefs.homeOriginPlace.label, 'Via Giovanni Battista Tiepolo, Padova');
+      assert.doesNotMatch(result.summary, /traffic/i, 'without a key Nuvia says nothing about traffic');
+
+      // Live traffic: a TomTom key turns the free-flow time into the real one.
+      await click('#open-settings');
+      await ui.waitFor(`document.querySelector('#settings-dialog[open]')`);
+      await ui.eval(`document.querySelector('#settings-dialog .tabs [data-tab="integrations"]').click()`);
+      await ui.eval(`const k = document.querySelector('#traffic-key'); k.value = 'TEST-TRAFFIC-KEY'; k.dispatchEvent(new Event('change'))`);
+      await ui.eval(`document.querySelector('#settings-dialog').close()`);
+      await ui.waitFor(`/\\+9 min traffic/.test(document.querySelector('.route-summary')?.innerText || '')`, { timeout: 20000 });
+      const live = await ui.eval(`return { summary: document.querySelector('.route-summary').innerText, meta: document.querySelector('.widget[data-widget="commute"] .w-meta').innerText, level: document.querySelector('.route-summary .traffic').className }`);
+      assert.match(live.summary, /44\s*min/, '35 min free-flow plus a 9 min delay');
+      assert.match(live.summary, /37\.8 km/);
+      assert.match(live.meta, /44 min .* \+9 min traffic/);
+      assert.match(live.level, /slow/);
+
       await ui.eval(`document.querySelectorAll('.route-form .segmented button')[1].click()`);
       await ui.waitFor(`/bike/.test(document.querySelector('.widget[data-widget="commute"] .w-meta').innerText)`);
+      // Bikes are not stuck in car traffic.
+      assert.doesNotMatch(await text('.route-summary'), /traffic/i);
     });
 
     await t.test('notifications: panel, delete one and clear all', async () => {
@@ -338,6 +360,8 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       assert.ok(await ui.eval(`return getComputedStyle(document.querySelector('#view-shot')).backgroundImage.startsWith('url(')`), 'service screenshot under the dialog');
       await ui.eval(`[...document.querySelectorAll('#service-dialog .preset')].find(p => p.innerText.includes('Notion')).click()`);
       assert.equal(await ui.eval(`return document.querySelector('#service-dialog input[type=url]').value`), 'https://www.notion.so/');
+      await ui.eval(`[...document.querySelectorAll('#service-dialog .preset')].find(p => p.innerText.includes('Microsoft Teams')).click()`);
+      assert.deepEqual(await ui.eval(`const [name, url] = document.querySelectorAll('#service-dialog input'); return [name.value, url.value]`), ['Microsoft Teams', 'https://teams.microsoft.com/v2/']);
       await ui.eval(`const [name, url] = document.querySelectorAll('#service-dialog input'); name.value = 'Second site'; url.value = '${base}/site?2'; document.querySelector('#save-service').click()`);
       await ui.waitFor(`document.querySelector('#page-title').textContent === 'Second site' && !document.querySelector('#service-dialog')`);
       assert.match(await text('#toasts'), /Add another/);

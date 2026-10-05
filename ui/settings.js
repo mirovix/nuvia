@@ -88,8 +88,18 @@ function integrationsTab() {
       : h('div.inline', h('span.muted', { style: 'flex:1' }, 'Not connected'), h('button.btn.sm.accent', { type: 'button', on: { click: () => emit('ias-login') } }, icon('log-in'), 'Sign in')));
   };
   renderAccount();
+  const trafficKey = h('input#traffic-key', { type: 'password', value: prefs.trafficKey || '', placeholder: 'Paste the key here', autocomplete: 'off', spellcheck: false, on: { change: async () => {
+    prefs.trafficKey = trafficKey.value.trim();
+    // The main process reads the key from the saved file: write it before recalculating.
+    await flushPrefs();
+    emit('refresh-commute');
+    toast(prefs.trafficKey ? 'Live traffic on: the commute now includes delays.' : 'Live traffic off.');
+  } } });
   return [
-    h('h3', { style: 'margin:0 0 8px;font-size:13px' }, 'IAS Lab · DEI Labs'),
+    h('h3', { style: 'margin:0 0 8px;font-size:13px' }, 'Live traffic'),
+    h('p.dim', { style: 'margin-top:0' }, 'The commute time is free-flow unless you add a traffic key. TomTom gives one free (2,500 routes a day, no card): sign up, create a key and paste it here. Leave it empty and Nuvia simply says nothing about traffic.'),
+    h('label.field', h('span', 'TomTom API key'), trafficKey, h('small', h('button.link', { type: 'button', on: { click: () => window.open('https://developer.tomtom.com/user/register') } }, 'Get a free key'), ' · only used to ask for the delay on your route, from this computer.')),
+    h('h3', { style: 'margin:22px 0 8px;font-size:13px' }, 'IAS Lab · DEI Labs'),
     h('p.dim', { style: 'margin-top:0' }, 'Nuvia records check-in and check-out directly on deilabs.dei.unipd.it. Your credentials stay encrypted in the system keychain.'),
     account,
     h('h3', { style: 'margin:22px 0 8px;font-size:13px' }, 'Trains · Ritardometro'),

@@ -1,6 +1,6 @@
 {
   "name": "nuvia-desktop",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "private": true,
   "description": "Tutti i tuoi servizi web in una finestra, con sessioni persistenti. Windows, macOS e Linux.",
   "author": {
@@ -16,7 +16,9 @@
     "test": "node --test test/unit/*.test.js",
     "test:ui": "node --test --test-concurrency=1 test/ui.test.js",
     "test:integration": "node --test --test-concurrency=1 test/integration.test.js",
-    "test:all": "npm test && npm run test:ui && npm run test:integration",
+    "test:teams": "node --test --test-concurrency=1 test/teams.test.js",
+    "test:teams:live": "node --test --test-concurrency=1 test/teams-live.test.js",
+    "test:all": "npm test && npm run test:ui && npm run test:integration && npm run test:teams",
     "icons": "node scripts/build-icons.mjs",
     "pack": "electron-builder --publish never",
     "pack:linux": "electron-builder --linux --publish never",

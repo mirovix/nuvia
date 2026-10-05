@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Microsoft Teams</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E"></head>
+<body>
+<h1>Microsoft Teams</h1><p>Teams is ready in Nuvia.</p>
+<!-- Minimal copy of the Teams chat list read by lib/scripts.js#chatList.
+     Teams marks its own elements with data-tid; the app rail below must be ignored. -->
+<nav aria-label="App bar"><div role="listitem">Activity</div><div role="listitem">Calendar</div></nav>
+<div data-tid="chat-list">
+  <div data-tid="chat-list-item" role="listitem"><div data-tid="chat-list-item-title">Team Nuvia</div><div>11:20</div><div>Luca: standup in 10 minutes</div><span data-tid="chat-list-item-unread-badge" aria-label="3 unread messages">3</span></div>
+  <div data-tid="chat-list-item" role="listitem"><div data-tid="chat-list-item-title">Prof. Bianchi</div><div>09:05</div><div>Thanks, I'll read the draft today</div></div>
+</div>
+<div data-tid="chat-pane" hidden>
+  <div data-tid="chat-header-title"></div>
+  <div data-tid="newMessageBody"><div data-tid="ckeditor" contenteditable="true" role="textbox"></div></div>
+  <button data-tid="newMessageCommands-send" aria-label="Send">Send</button>
+</div>
+<script>
+  window.sent = [];
+  document.querySelectorAll('[data-tid="chat-list-item"]').forEach(row => row.addEventListener('click', () => {
+    const pane = document.querySelector('[data-tid="chat-pane"]');
+    pane.hidden = false;
+    pane.querySelector('[data-tid="chat-header-title"]').textContent = row.querySelector('[data-tid="chat-list-item-title"]').textContent;
+  }));
+  document.querySelector('[data-tid="newMessageCommands-send"]').addEventListener('click', () => {
+    const box = document.querySelector('[data-tid="ckeditor"]');
+    window.sent.push({ chat: document.querySelector('[data-tid="chat-header-title"]').textContent, text: box.innerText });
+    document.title = 'sent:' + box.innerText;
+    box.textContent = '';
+  });
+</script>
+</body></html>

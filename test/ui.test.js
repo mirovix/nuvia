@@ -57,6 +57,24 @@ function mockServer() {
   return new Promise(resolveServer => server.listen(0, '127.0.0.1', () => resolveServer(server)));
 }
 
+/**
+ * A real (tiny) asar archive. Electron's fs shows a valid app.asar as a folder,
+ * which is what made a second update fail with ENOTDIR on rmdir.
+ */
+function tinyAsar() {
+  const payload = Buffer.from('hello');
+  const json = Buffer.from(JSON.stringify({ files: { 'hello.txt': { size: payload.length, offset: '0' } } }));
+  const padding = (4 - (json.length % 4)) % 4;
+  const header = Buffer.alloc(8 + json.length + padding);
+  header.writeUInt32LE(4 + json.length + padding, 0);
+  header.writeUInt32LE(json.length, 4);
+  json.copy(header, 8);
+  const size = Buffer.alloc(8);
+  size.writeUInt32LE(4, 0);
+  size.writeUInt32LE(header.length, 4);
+  return Buffer.concat([size, header, payload]);
+}
+
 function extension(root, id, manifest, files = {}) {
   const dir = join(root, 'marketplace-extensions', id);
   mkdirSync(dir, { recursive: true });
@@ -455,6 +473,17 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       await ui.waitFor(`window.nuvia.debugState().then(s => s.overlayDepth === 0 && s.attached && s.activeKey === 'spotify')`);
       await click('#nav-reload');
       await click('[data-route="home"]');
+    });
+
+    await t.test('updates: a leftover install folder is removed although it holds an app.asar', async () => {
+      const folder = join(app.profile, 'Nuvia.update');
+      const make = () => { mkdirSync(join(folder, 'resources'), { recursive: true }); writeFileSync(join(folder, 'resources', 'app.asar'), tinyAsar()); };
+      make();
+      const plain = await ui.eval(`return window.nuvia.debugRemoveInstallTree({ folder: ${JSON.stringify(folder)}, safe: false })`);
+      assert.match(plain.error || '', /ENOTDIR|not a directory/, 'a plain recursive remove walks into the archive');
+      make();
+      const safe = await ui.eval(`return window.nuvia.debugRemoveInstallTree({ folder: ${JSON.stringify(folder)}, safe: true })`);
+      assert.deepEqual(safe, { removed: true, error: null });
     });
 
     await t.test('updates: a new release is noticed and offered, with a manual check in About', async () => {

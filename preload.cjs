@@ -89,5 +89,6 @@ contextBridge.exposeInMainWorld('nuvia', {
   debugState: invoke('debug:state'),
   debugGuard: invoke('debug:crash-guard'),
   debugCrash: invoke('debug:crash-view'),
-  debugCookies: invoke('debug:cookie-roundtrip')
+  debugCookies: invoke('debug:cookie-roundtrip'),
+  debugRemoveInstallTree: invoke('debug:remove-install-tree')
 });

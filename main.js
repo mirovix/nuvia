@@ -18,7 +18,7 @@ import { fillSignIn, isSignInUrl } from './lib/autologin.js';
 import { createTileSource, parseTileUrl } from './lib/tiles.js';
 import { createTrafficSource, trafficLevel } from './lib/traffic.js';
 import { CHECK_EVERY_MS, checkRelease, installKind, installPaths, parseSums } from './lib/updater.js';
-import { apply as applyStaged, download, prepare as prepareUpdate } from './lib/update-install.js';
+import { apply as applyStaged, download, prepare as prepareUpdate, removeTree } from './lib/update-install.js';
 
 const { script } = pageScripts;
 const TEST = process.env.NUVIA_TEST === '1';
@@ -1487,4 +1487,14 @@ if (TEST) {
     return { value: cookie?.value || null, session: cookie?.session ?? null, encrypted: existsSync(cookieFile(id)) && !readFileSync(cookieFile(id)).toString('latin1').includes('kept') };
   });
   handle('debug:crash-view', key => { views.get(key)?.webContents.forcefullyCrashRenderer(); return Boolean(views.get(key)); });
+  // An install folder holds resources/app.asar, which Electron's fs shows as a
+  // directory: removing it needs lib/update-install.js#removeTree.
+  handle('debug:remove-install-tree', ({ folder, safe = true }) => {
+    try {
+      if (safe) removeTree(folder); else rmSync(folder, { recursive: true, force: true });
+      return { removed: !existsSync(folder), error: null };
+    } catch (error) {
+      return { removed: !existsSync(folder), error: error.message };
+    }
+  });
 }

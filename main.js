@@ -17,7 +17,7 @@ import * as pageScripts from './lib/scripts.js';
 import { fillSignIn, isSignInUrl } from './lib/autologin.js';
 import { createTileSource, parseTileUrl } from './lib/tiles.js';
 import { createTrafficSource, trafficLevel } from './lib/traffic.js';
-import { CHECK_EVERY_MS, checkRelease, installKind, installPaths, parseSums } from './lib/updater.js';
+import { CHECK_EVERY_MS, checkRelease, installKind, installPaths, isNewer, parseSums } from './lib/updater.js';
 import { apply as applyStaged, download, prepare as prepareUpdate, removeTree } from './lib/update-install.js';
 
 const { script } = pageScripts;
@@ -713,11 +713,18 @@ function canReplace(target) {
 }
 
 async function checkForUpdates({ manual = false } = {}) {
-  if (['checking', 'downloading', 'ready'].includes(updater.state)) return publicUpdate();
+  if (['checking', 'downloading'].includes(updater.state)) return publicUpdate();
+  // A version is already staged: keep it unless an even newer one has been released.
+  const held = updater.state === 'ready' ? updater.version : null;
+  if (held && !manual) return publicUpdate();
   setUpdate({ state: 'checking', error: null });
   try {
     const found = await checkRelease({ current: app.getVersion(), kind: updater.kind, arch: process.arch, fetchImpl: updateFetch, api: updaterApi });
-    if (!found) { setUpdate({ state: 'current' }); return publicUpdate(); }
+    if (!found || (held && !isNewer(found.version, held))) {
+      setUpdate(held ? { state: 'ready', version: held } : { state: 'current' });
+      return publicUpdate();
+    }
+    if (held) discardStaged(); // superseded: the newer version replaces it
     const { target, launcher } = installPaths(updater.kind);
     setUpdate({ version: found.version, page: found.page });
     // Development builds, .deb/.rpm and read-only installs: offer the download instead.
@@ -738,9 +745,18 @@ async function checkForUpdates({ manual = false } = {}) {
     addNotification({ title: `Nuvia ${found.version} is ready`, body: 'It installs when you restart Nuvia. Restart now from the banner at the top.' });
   } catch (error) {
     log('update', error.message);
-    setUpdate({ state: 'error', error: error.message });
+    // A version already staged survives a failed check: it is still installable.
+    if (held && updater.staged) setUpdate({ state: 'ready', version: held, error: error.message });
+    else setUpdate({ state: 'error', error: error.message });
   }
   return publicUpdate();
+}
+
+/** Throws away a staged version that a newer release has superseded. */
+function discardStaged() {
+  const { staged, cleanup } = updater.staged || {};
+  for (const path of [staged, cleanup]) { if (path) { try { removeTree(path); } catch { /* best effort */ } } }
+  updater.staged = null;
 }
 
 function installUpdate({ relaunch }) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkRelease, installKind, installPaths, isNewer, parseSums, pickAsset } from '../../lib/updater.js';
+import { checkRelease, installKind, installPaths, isNewer, newestRelease, parseSums, pickAsset } from '../../lib/updater.js';
 
 const ASSETS = ['Nuvia-0.7.0-amd64.deb', 'Nuvia-0.7.0-arm64.zip', 'Nuvia-0.7.0-mac-arm64.dmg', 'Nuvia-0.7.0-portable.exe', 'Nuvia-0.7.0-x64.tar.gz',
   'Nuvia-0.7.0-x64.zip', 'Nuvia-0.7.0-x86_64.AppImage', 'Nuvia-0.7.0-x86_64.rpm', 'Nuvia-Setup-0.7.0.exe', 'SHA256SUMS.txt']
@@ -56,4 +56,24 @@ test('checkRelease reports only newer, final releases', async () => {
   assert.equal(await checkRelease({ current: '0.7.0', kind: 'folder', arch: 'x64', fetchImpl: release('v0.7.0') }), null);
   assert.equal(await checkRelease({ current: '0.6.4', kind: 'folder', arch: 'x64', fetchImpl: release('v0.7.0', { prerelease: true }) }), null);
   await assert.rejects(checkRelease({ current: '0.6.4', kind: 'folder', fetchImpl: async () => ({ ok: false, status: 403 }) }), /403/);
+});
+
+test('the update always lands on the last version released', async () => {
+  const entry = (tag, extra = {}) => ({ tag_name: tag, html_url: `https://github.com/x/${tag}`, body: 'Fixes', assets: ASSETS.map(a => ({ name: a.name, browser_download_url: a.url, size: 1 })), ...extra });
+  // GitHub lists releases newest-first, but "newest" is the publish date: a late
+  // patch of an old line (0.6.11) must not win over 0.7.0, and vice versa.
+  const list = [entry('v0.6.11'), entry('v0.7.0'), entry('v0.6.9')];
+  assert.equal(newestRelease(list).tag_name, 'v0.7.0');
+  assert.equal(newestRelease([entry('v0.8.0', { draft: true }), entry('v0.7.5', { prerelease: true }), entry('v0.7.0')]).tag_name, 'v0.7.0');
+  assert.equal(newestRelease([entry('v0.7.0', { prerelease: true })]), null);
+
+  const serve = releases => async () => ({ ok: true, json: async () => releases });
+  // An install four versions behind jumps straight to the highest one.
+  const found = await checkRelease({ current: '0.6.5', kind: 'folder', arch: 'x64', fetchImpl: serve(list) });
+  assert.equal(found.version, '0.7.0');
+  assert.equal(found.page, 'https://github.com/x/v0.7.0');
+  assert.equal(await checkRelease({ current: '0.7.0', kind: 'folder', arch: 'x64', fetchImpl: serve(list) }), null);
+  assert.equal(await checkRelease({ current: '0.6.5', kind: 'folder', arch: 'x64', fetchImpl: serve([]) }), null);
+  // A single release object (the /releases/latest shape) still works.
+  assert.equal((await checkRelease({ current: '0.6.5', kind: 'folder', arch: 'x64', fetchImpl: serve(entry('v0.7.0')) })).version, '0.7.0');
 });

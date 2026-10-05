@@ -89,7 +89,10 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
   const now = Date.now();
   // A newer release "on GitHub": the app must notice it on its own.
   const releaseFile = join(tmpdir(), `nuvia-release-${process.pid}.json`);
-  writeFileSync(releaseFile, JSON.stringify({ tag_name: 'v99.0.0', html_url: 'https://github.com/mirovix/nuvia/releases/tag/v99.0.0', body: 'Fixes', assets: [{ name: 'Nuvia-99.0.0-x64.tar.gz', browser_download_url: 'https://example.invalid/x.tar.gz', size: 1 }] }));
+  // A list as GitHub returns it: ordered by publish date, so the highest version
+  // is not first. The app must offer 99.0.0, never the newer-looking 98.0.1 or the draft.
+  const release = (tag, extra = {}) => ({ tag_name: tag, html_url: `https://github.com/mirovix/nuvia/releases/tag/${tag}`, body: 'Fixes', assets: [{ name: `Nuvia-${tag.slice(1)}-x64.tar.gz`, browser_download_url: 'https://example.invalid/x.tar.gz', size: 1 }], ...extra });
+  writeFileSync(releaseFile, JSON.stringify([release('v100.0.0', { draft: true }), release('v98.0.1'), release('v99.0.0'), release('v97.0.0')]));
   const app = await launch({
     env: { NUVIA_UPDATE_URL: pathToFileURL(releaseFile).href, NUVIA_TRAFFIC_URL: base, NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
     prepare: profile => {
@@ -489,6 +492,8 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
     await t.test('updates: a new release is noticed and offered, with a manual check in About', async () => {
       await ui.waitFor(`!document.querySelector('#update-banner').hidden && /99\\.0\\.0 is available/.test(document.querySelector('#update-banner').innerText)`, { timeout: 20000 });
       assert.ok(await ui.eval(`return Boolean(document.querySelector('#update-download'))`), 'a development build offers the download instead of installing');
+      const offered = await ui.eval(`return (await window.nuvia.updateState()).version`);
+      assert.equal(offered, '99.0.0', 'the highest released version wins, not the most recently published one');
       await click('#open-settings');
       await ui.waitFor(`document.querySelector('#settings-dialog[open]')`);
       await ui.eval(`document.querySelector('#settings-dialog .tabs [data-tab="about"]').click()`);

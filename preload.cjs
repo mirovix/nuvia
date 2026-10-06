@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('nuvia', {
   onNotificationsChanged: listen('notifications:changed'),
 
   aiUsage: invoke('ai:usage'),
+  installClaudeStatusLine: invoke('ai:install-claude-statusline'),
   updateState: invoke('update:get'),
   checkForUpdates: invoke('update:check'),
   restartToUpdate: invoke('update:restart'),

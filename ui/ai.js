@@ -1,5 +1,5 @@
 // Claude & Codex: plan limits, reset times and token usage.
-import { api, state, $, h, icon, fill, emit, on, empty, skeleton, countdown, tokens, clock, relativeTime, dayLabel } from './core.js';
+import { api, state, $, h, icon, fill, emit, on, empty, skeleton, countdown, tokens, clock, relativeTime, dayLabel, toast } from './core.js';
 import { defineWidget } from './home.js';
 import { openService } from './router.js';
 import { openAddService } from './services.js';
@@ -31,8 +31,9 @@ function stat(label, value) { return h('div.stat', h('small', label), h('b', val
 function claudeMeters(claude) {
   const web = claude.web || {};
   const rows = [];
-  if (web.session) rows.push(meter('Session · 5 hours', web.session.percent, resetText(web.session.resetsAt)));
-  if (web.weekly) rows.push(meter('Week · all models', web.weekly.percent, resetText(web.weekly.resetsAt)));
+  const when = window => (window.stale ? 'window has since reset' : resetText(window.resetsAt));
+  if (web.session) rows.push(meter('Session · 5 hours', web.session.percent, when(web.session)));
+  if (web.weekly) rows.push(meter('Week · all models', web.weekly.percent, when(web.weekly)));
   if (web.weeklyOpus) rows.push(meter('Week · Opus', web.weeklyOpus.percent, resetText(web.weeklyOpus.resetsAt)));
   if (web.weeklySonnet) rows.push(meter('Week · Sonnet', web.weeklySonnet.percent, resetText(web.weeklySonnet.resetsAt)));
   if (!rows.length && claude.block) {
@@ -44,17 +45,66 @@ function claudeMeters(claude) {
 
 function claudeNote(claude) {
   const web = claude.web || {};
+  if (web.source === 'claude-code') return `Limits from Claude Code’s status line, ${relativeTime(web.updatedAt)}. They refresh whenever Claude Code runs.`;
   if (web.session || web.weekly) return `Limits read from claude.ai ${relativeTime(web.updatedAt)}.`;
-  if (web.missing) return 'Add Claude as a service (claude.ai) to see plan percentages.';
-  if (web.loggedOut) return 'Sign in to claude.ai in the Claude service to see plan percentages.';
-  return 'Plan percentages aren’t available right now. Token counts come from local Claude Code logs.';
+  if (web.missing) return 'Add Claude as a service (claude.ai), or let Claude Code report its limits, to see plan percentages.';
+  if (web.loggedOut) return 'Sign in to claude.ai in the Claude service, or let Claude Code report its limits, to see plan percentages.';
+  return `claude.ai didn’t return your limits${web.error ? ` (${web.error})` : ''}. Claude Code can report them instead.`;
+}
+
+async function installStatusLine(button) {
+  button.disabled = true;
+  const result = await api.installClaudeStatusLine();
+  if (result?.error) { toast(result.error); button.disabled = false; return; }
+  toast('Done. Claude Code’s limits appear here after its next reply.');
+  refreshUsage(true);
+}
+
+// Offered when there are no plan percentages: Claude Code knows its limits and
+// hands them to a status line command, which Nuvia can provide.
+function claudeStatusLineOffer(claude) {
+  const line = claude.statusLine;
+  const web = claude.web || {};
+  if (!line || line.installed || web.session || web.weekly) return null;
+  if (line.otherStatusLine) return h('p.note', 'Claude Code already has a status line of its own, so Nuvia can’t read its limits from there.');
+  const button = h('button.btn.sm.accent', { type: 'button', on: { click: () => installStatusLine(button) } }, icon('gauge'), 'Show limits from Claude Code');
+  return h('div.ai-offer', h('p.note', `Adds a status line to Claude Code (${line.settingsFile}) that shows “5h 23% · 7d 41%” in your terminal and shares those numbers with Nuvia. A backup of the file is kept.`), button);
+}
+
+function codexWindowMeters(limits, measured) {
+  const rows = [];
+  const sub = text => [text, measured].filter(Boolean).join(' · ');
+  const hours = limits.session ? Math.round((limits.session.windowMinutes || 300) / 60) : 5;
+  if (limits.session) {
+    rows.push(limits.session.stale
+      ? meter(`Session · ${hours} hours`, 0, sub('window has since reset'))
+      : meter(`Session · ${hours} hours`, limits.session.percent, sub(resetText(limits.session.resetsAt))));
+  }
+  if (limits.weekly) rows.push(meter('Week', limits.weekly.percent, sub(limits.weekly.resetsAt ? resetText(limits.weekly.resetsAt) : 'reset')));
+  return rows;
 }
 
 function codexMeters(codex) {
-  const rows = [];
-  if (codex.session) rows.push(meter(`Session · ${Math.round((codex.session.windowMinutes || 300) / 60)} hours`, codex.session.percent, codex.session.resetsAt ? resetText(codex.session.resetsAt) : 'window expired, limit reset'));
-  if (codex.weekly) rows.push(meter('Week', codex.weekly.percent, codex.weekly.resetsAt ? resetText(codex.weekly.resetsAt) : 'reset'));
-  return rows;
+  const accounts = (codex.accounts || []).filter(account => account.live);
+  // One block of bars per signed-in account (each ~/.codex* folder), read live.
+  if (accounts.length > 1) {
+    return accounts.map(account => h('div.ai-account',
+      h('div.ai-account-head', h('strong', account.email || account.home.split(/[\\/]/).pop()), account.plan ? h('span.tag', account.plan) : null),
+      codexWindowMeters(account, '')));
+  }
+  if (accounts.length === 1) return codexWindowMeters(accounts[0], '');
+  // No live answer: the logs only hold what Codex saw during its last run, so
+  // say when that was instead of showing old numbers as current.
+  return codexWindowMeters(codex, codex.updatedAt ? `measured ${relativeTime(codex.updatedAt)}` : '');
+}
+
+function codexNote(codex) {
+  const model = codex.model ? ` · last model ${codex.model}` : '';
+  const failed = (codex.accounts || []).find(account => account.error);
+  const live = (codex.accounts || []).filter(account => account.live);
+  if (live.length) return `Limits read live from your Codex account${live.length > 1 ? 's' : ''} ${relativeTime(Math.max(...live.map(account => account.updatedAt)))}${model}. Another account: sign in once with CODEX_HOME=~/.codex-work codex login.`;
+  if (failed) return `Codex didn’t answer (${failed.error}), so these limits come from the last Codex session, ${relativeTime(codex.updatedAt)}${model}.`;
+  return `Limits come from the last Codex session, ${relativeTime(codex.updatedAt)}${model}. Token counts include cached reads.`;
 }
 
 function planOf(kind, data) { return String((kind === 'claude' ? data?.web?.plan : data?.plan) || '').replace(/^default_/, '').replace(/_/g, ' '); }
@@ -62,7 +112,8 @@ function planOf(kind, data) { return String((kind === 'claude' ? data?.web?.plan
 function column(kind, data, { compact = false, headless = false } = {}) {
   const isClaude = kind === 'claude';
   const title = isClaude ? 'Claude' : 'Codex';
-  if (!data?.available && !(isClaude && (data?.web?.session || data?.web?.weekly))) {
+  const hasLive = isClaude ? Boolean(data?.web?.session || data?.web?.weekly) : (data?.accounts || []).some(account => account.live);
+  if (!data?.available && !hasLive) {
     return h('div.ai-col', h('h4', icon(isClaude ? 'asterisk' : 'square-terminal'), title),
       empty(isClaude ? 'asterisk' : 'square-terminal', `No ${title} activity`, isClaude ? 'No recent logs in ~/.claude.' : 'No recent logs in ~/.codex.'));
   }
@@ -74,7 +125,8 @@ function column(kind, data, { compact = false, headless = false } = {}) {
     h('div.stats', stat('5 hours', tokens(data.tokens?.fiveHours)), stat('Today', tokens(data.tokens?.today)), stat('7 days', tokens(data.tokens?.week)))
   ];
   if (!compact) {
-    children.push(h('p.note', isClaude ? claudeNote(data) : `Limits updated ${relativeTime(data.updatedAt)} from the last Codex session${data.model ? ` · model ${data.model}` : ''}. Token counts include cached reads.`));
+    children.push(h('p.note', isClaude ? claudeNote(data) : codexNote(data)));
+    if (isClaude) children.push(claudeStatusLineOffer(data));
     if (isClaude && data.models?.length) children.push(h('div.model-list', h('h3', { style: 'margin:0 0 4px;font-size:12px;color:var(--text-3)' }, 'Tokens by model · 7 days'), data.models.slice(0, 5).map(model => h('div', h('span', model.name), h('b', tokens(model.tokens))))));
     if (!isClaude && data.tokens) children.push(h('div.model-list', h('div', h('span', 'Input (cached)'), h('b', `${tokens(data.tokens.input)} (${tokens(data.tokens.cached)})`)), h('div', h('span', 'Output'), h('b', tokens(data.tokens.output)))));
   }

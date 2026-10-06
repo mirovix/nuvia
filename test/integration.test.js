@@ -124,6 +124,21 @@ test('Nuvia with the real services', { timeout: 600000 }, async t => {
       assert.ok(Array.isArray(feed.items) && feed.sources.some(source => source.serviceId === 'wa'));
     });
 
+    await t.test('sign-ins survive: Chromium does not delete a login domain as a tracker', async () => {
+      // Chromium's DIPS deletes the storage of a site that writes cookies but
+      // never gets a click of its own. Single-sign-on domains work exactly that
+      // way, which signed the user out of Outlook and Teams about once a day.
+      const partition = await ui.eval(`return (await window.nuvia.listServices())[0]?.id || null`);
+      assert.ok(partition, 'a service to test with');
+      const before = await ui.eval(`return window.nuvia.debugCookies(${JSON.stringify(partition)})`);
+      assert.equal(before.value, 'kept', 'the session cookie comes back after a restart');
+      assert.ok(before.encrypted, 'and it is stored encrypted');
+      // The feature must be off: with it on, the file below reappears and the
+      // timer starts deleting storage again.
+      const dips = join(app.profile, 'Partitions', `nuvia-${partition}`, 'DIPS');
+      assert.ok(!existsSync(dips), `Chromium still runs its tracker cleanup (${dips})`);
+    });
+
     await t.test('Claude & Codex from local logs', async () => {
       if (!existsSync(join(homedir(), '.codex')) && !existsSync(join(homedir(), '.claude'))) return t.skip('no local logs');
       const usage = await ui.eval('return window.nuvia.aiUsage({})', { timeout: 60000 });

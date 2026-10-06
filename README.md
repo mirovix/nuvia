@@ -118,7 +118,9 @@ Turn it off in **Settings → General → Update automatically**; check by hand 
 - **Stay signed in** (on by default, Settings → General): when you sign in on a service's sign-in page (Google, a university single sign-on, Microsoft), Nuvia keeps that email and password encrypted with the system keychain and uses them only to sign that service back in when its session expires. Nothing is stored on any other page, and you can remove the saved sign-in per service in Edit service. Otherwise each login stays in a local Chromium profile on your computer.
 - Session-only cookies (for example a university single sign-on) are kept across restarts, encrypted with the system keychain, like Chrome does when it reopens your tabs.
 - Mail and chat previews, the agenda and the player state are read from the service pages already open in Nuvia. Nothing goes through a third-party server.
-- **Claude & Codex** reads the local session logs of Claude Code (`~/.claude`) and Codex (`~/.codex`). If you add Claude as a service, it also reads the usage page of your claude.ai account. No credentials are read.
+- **Claude & Codex** reads the local session logs of Claude Code (`~/.claude`) and Codex (`~/.codex`). No credentials are read.
+  - *Codex* limits are asked live from the Codex CLI (`codex app-server`), one set of bars per account. Codex keeps one login per folder: sign in a second account once with `CODEX_HOME=~/.codex-work codex login` and every `~/.codex-*` folder shows up on its own.
+  - *Claude* limits come from your claude.ai usage page if you add Claude as a service. Otherwise **Show limits from Claude Code** (on the Claude & Codex page) adds a status line to Claude Code that prints `5h 23% · 7d 41%` in the terminal and shares those numbers with Nuvia. It never replaces a status line you already have, and keeps a backup of `settings.json`.
 - Extensions are never loaded into Nuvia's own interface, only into the services where you enable them.
 
 ## Extensions

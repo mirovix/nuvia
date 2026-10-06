@@ -1,5 +1,5 @@
 import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components, safeStorage, protocol } from 'electron';
-import { join, extname, resolve, sep, dirname } from 'node:path';
+import { join, extname, resolve, sep, dirname, delimiter } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync, accessSync, constants as fsConstants } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { homedir, userInfo } from 'node:os';
@@ -9,7 +9,9 @@ import { geocode } from './lib/geocode.js';
 import { routeUrl, summarizeRoute, MODES } from './lib/route.js';
 import { parseICS, expandEvents } from './lib/ics.js';
 import { parseChatRow, parseMailLines, parseAgendaText, sortFeed, unreadFromTitle, chatTimeToDate } from './lib/feed.js';
-import { normalizeClaudeLimits, codexUsage, claudeUsage } from './lib/usage.js';
+import { normalizeClaudeLimits, codexUsage, claudeUsage, readClaudeCodeLimits } from './lib/usage.js';
+import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-statusline.js';
+import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
 import { readInfo, defaultRules } from './lib/extensions.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
@@ -50,6 +52,14 @@ const paths = {
 };
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// Keep sign-ins alive. Chromium's DIPS ("Bounce Tracking Mitigation") deletes the
+// storage of any site that writes cookies but never gets a click of its own. A
+// single-sign-on domain is exactly that: login.microsoftonline.com and
+// office365.com store the session while the user only ever clicks the mailbox,
+// so Chromium wiped them about once a day and Outlook/Teams asked to sign in
+// again. Each service already lives in its own partition, so the tracking these
+// mitigations exist to stop cannot cross between services anyway.
+app.commandLine.appendSwitch('disable-features', 'DIPS');
 // Linux only: ECS's bundled SUID sandbox cannot be root-owned on many distros.
 // (--no-zygote must come from the command line: see scripts/start.mjs and scripts/after-pack.cjs.)
 if (process.platform === 'linux') app.commandLine.appendSwitch('no-sandbox');
@@ -1473,6 +1483,7 @@ async function readClaudeWebLimits(force) {
   if (!data?.usage) data = await withHiddenPage(service.id, 'https://claude.ai/settings/usage', read, { settle: 2000 });
   const limits = normalizeClaudeLimits(data?.usage);
   const value = limits && (limits.session || limits.weekly) ? { ...limits, plan: data.plan, updatedAt: Date.now() } : { loggedOut: Boolean(data?.loggedOut), error: data?.error || (data ? 'Limits unavailable' : 'claude.ai unreachable') };
+  if (value.error) log('claude limits', value.loggedOut ? 'signed out of claude.ai' : value.error, data?.status ? `HTTP ${data.status}` : '');
   Object.assign(claudeWeb, { at: Date.now(), value });
   return value;
 }
@@ -1482,11 +1493,80 @@ async function localUsage() {
   // Worker threads may be unavailable (e.g. inside some asar builds): scan inline.
   try { return { codex: codexUsage({ root: CODEX_HOME }), claude: claudeUsage({ root: CLAUDE_HOME }) }; } catch (error) { return { error: error.message }; }
 }
+// Live Codex limits, one per signed-in Codex folder (lib/codex-live.js). Cached
+// for a minute: the widget refreshes every minute and each read starts Codex.
+const codexLive = new Map();
+async function codexAccounts(force) {
+  // Tests only look at their own CODEX_HOME, never at the real ~/.codex-* folders.
+  const extra = String(process.env.NUVIA_CODEX_HOMES || '').split(delimiter).filter(Boolean); // tests
+  const homes = codexHomes({ home: TEST ? undefined : homedir(), primary: CODEX_HOME, extra });
+  if (!homes.length) return [];
+  const command = process.env.NUVIA_CODEX_BIN || findCodex({ home: homedir() });
+  const read = await Promise.all(homes.map(async home => {
+    const cached = codexLive.get(home);
+    if (!force && cached && Date.now() - cached.at < 60000) return cached.value;
+    if (cached?.pending) return cached.pending;
+    const pending = readCodexLive({ home, command });
+    codexLive.set(home, { ...cached, pending });
+    const value = await pending;
+    if (value.error) log('codex limits', home, value.error);
+    codexLive.set(home, { at: Date.now(), value });
+    return value;
+  }));
+  // A folder copied from another one (e.g. ~/.codex switched to ~/.codex-account3)
+  // is the same account: show it once, under the first folder that has it.
+  const seen = new Set();
+  return read.filter(account => {
+    if (!account.email) return true;
+    if (seen.has(account.email)) return false;
+    seen.add(account.email);
+    return true;
+  });
+}
+// Claude Code's own plan limits, saved by the status line script Nuvia can install
+// (lib/claude-statusline.js). Used when claude.ai does not answer.
+const claudeCodeFiles = { limits: () => fileInProfile('claude-limits.json'), script: () => fileInProfile('claude-statusline.cjs'), settings: () => join(CLAUDE_HOME, 'settings.json') };
+function claudeCodeLimits() {
+  try { return readClaudeCodeLimits(readFileSync(claudeCodeFiles.limits(), 'utf8')); } catch { return null; }
+}
+function claudeStatusLineState() {
+  const settings = readJson(claudeCodeFiles.settings(), {});
+  const installed = Boolean(settings.statusLine?.command?.includes(claudeCodeFiles.script()));
+  return { installed, otherStatusLine: Boolean(settings.statusLine) && !installed, settingsFile: claudeCodeFiles.settings() };
+}
+handle('ai:claude-statusline', () => claudeStatusLineState());
+// Only ever run from the button in Claude & Codex: it changes ~/.claude/settings.json.
+handle('ai:install-claude-statusline', () => {
+  const file = claudeCodeFiles.settings();
+  let settings = {};
+  if (existsSync(file)) {
+    try { settings = JSON.parse(readFileSync(file, 'utf8')); } catch { return { ...claudeStatusLineState(), error: 'Claude Code settings.json is not valid JSON, so Nuvia left it alone.' }; }
+  }
+  const next = withNuviaStatusLine(settings, claudeCodeFiles.script());
+  if (!next) return { ...claudeStatusLineState(), error: 'Claude Code already has a status line of its own. Nuvia does not replace it.' };
+  writeFileSync(claudeCodeFiles.script(), claudeStatusLineScript(claudeCodeFiles.limits()), { mode: 0o700 });
+  mkdirSync(dirname(file), { recursive: true });
+  if (existsSync(file)) copyFileSync(file, `${file}.nuvia-backup`);
+  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`);
+  return claudeStatusLineState();
+});
 handle('ai:usage', async ({ force = false } = {}) => {
-  const [local, web] = await Promise.all([localUsage(), claudeWebLimits(force).catch(error => ({ error: error.message }))]);
+  const [local, web, accounts] = await Promise.all([
+    localUsage(),
+    claudeWebLimits(force).catch(error => ({ error: error.message })),
+    codexAccounts(force).catch(error => { log('codex limits', error.message); return []; })
+  ]);
   const claudeService = services().find(item => serviceKind(item) === 'claude');
   const codexService = services().find(item => serviceKind(item) === 'codex');
-  return { codex: { ...(local.codex || {}), serviceId: codexService?.id || null }, claude: { ...(local.claude || {}), web, serviceId: claudeService?.id || null }, error: local.error || null, at: Date.now() };
+  const codex = { ...(local.codex || {}), accounts, serviceId: codexService?.id || null };
+  // The default account's live numbers replace the ones remembered in the logs.
+  const main = accounts.find(account => account.home === CODEX_HOME && account.live);
+  if (main) Object.assign(codex, { session: main.session, weekly: main.weekly, plan: main.plan || codex.plan, updatedAt: main.updatedAt, live: true });
+  // claude.ai first; Claude Code's status line when claude.ai has nothing.
+  const fromCode = claudeCodeLimits();
+  const webHasLimits = Boolean(web?.session || web?.weekly);
+  const claudeLimits = webHasLimits ? web : fromCode ? { ...fromCode, webError: web?.error || null, loggedOut: web?.loggedOut, missing: web?.missing } : web;
+  return { codex, claude: { ...(local.claude || {}), web: claudeLimits, statusLine: claudeStatusLineState(), serviceId: claudeService?.id || null }, error: local.error || null, at: Date.now() };
 });
 
 if (TEST) {

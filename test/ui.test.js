@@ -4,8 +4,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { launch, writeProfile, sleep, project } from './helpers.js';
@@ -93,8 +94,14 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
   // is not first. The app must offer 99.0.0, never the newer-looking 98.0.1 or the draft.
   const release = (tag, extra = {}) => ({ tag_name: tag, html_url: `https://github.com/mirovix/nuvia/releases/tag/${tag}`, body: 'Fixes', assets: [{ name: `Nuvia-${tag.slice(1)}-x64.tar.gz`, browser_download_url: 'https://example.invalid/x.tar.gz', size: 1 }], ...extra });
   writeFileSync(releaseFile, JSON.stringify([release('v100.0.0', { draft: true }), release('v98.0.1'), release('v99.0.0'), release('v97.0.0')]));
+  // Two Codex accounts, each signed in in its own folder; test/fixtures/fake-codex-app-server.mjs
+  // answers for them like `codex app-server` does (12% and 71% of the 5-hour window).
+  const codexAccounts = mkdtempSync(join(tmpdir(), 'nuvia-codex-accounts-'));
+  const codexPersonal = join(codexAccounts, '.codex-personal');
+  const codexWork = join(codexAccounts, '.codex-work');
+  for (const dir of [codexPersonal, codexWork]) { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'auth.json'), '{}'); }
   const app = await launch({
-    env: { NUVIA_UPDATE_URL: pathToFileURL(releaseFile).href, NUVIA_TRAFFIC_URL: base, NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
+    env: { NUVIA_CODEX_BIN: join(project, 'test', 'fixtures', 'fake-codex-app-server.mjs'), NUVIA_CODEX_HOMES: [codexPersonal, codexWork].join(delimiter), NUVIA_UPDATE_URL: pathToFileURL(releaseFile).href, NUVIA_TRAFFIC_URL: base, NUVIA_NOMINATIM_URL: base, NUVIA_ROUTING_URL: base, NUVIA_VIAGGIATRENO_URL: `${base}/vt`, NUVIA_RITARDOMETRO_CONFIG: `${base}/ritardometro.yaml`, DEI_USER: '', DEI_PASSWORD: '' },
     prepare: profile => {
       const fixtures = join(profile, 'fixtures');
       cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
@@ -253,18 +260,46 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
     });
 
     await t.test('Claude & Codex: limits, resets and tokens', async () => {
-      await ui.waitFor(`/63%/.test(document.querySelector('.widget[data-widget="ai"] .w-body')?.innerText) && /42%/.test(document.querySelector('.widget[data-widget="ai"] .w-body').innerText)`, { timeout: 40000 });
+      await ui.waitFor(`/71%/.test(document.querySelector('.widget[data-widget="ai"] .w-body')?.innerText) && /42%/.test(document.querySelector('.widget[data-widget="ai"] .w-body').innerText)`, { timeout: 40000 });
       await click('[data-route="ai"]');
       await ui.waitFor(`document.querySelectorAll('#page-ai .card').length === 2`);
       const page = await text('#page-ai');
       assert.match(page, /Session · 5 hours/);
       assert.match(page, /42%/);
       assert.match(page, /17%/);
-      assert.match(page, /63%/);
-      assert.match(page, /21%/);
-      assert.match(page, /resets in 1 h 30 min/);
       assert.match(page, /claude max 5x/i);
       assert.match(page, /1\.2M/);
+      // Codex: one block of bars per account, read live, not the numbers left in the logs.
+      const accounts = await ui.eval(`return [...document.querySelectorAll('#page-ai .ai-account')].map(block => block.innerText.replace(/\\s+/g, ' '))`);
+      assert.equal(accounts.length, 2, 'one block per Codex account');
+      assert.match(accounts[0], /\.codex-personal@example\.test.*plus.*12%.*40%/);
+      assert.match(accounts[1], /\.codex-work@example\.test.*pro.*71%.*40%/);
+      assert.doesNotMatch(accounts.join(' '), /63%/, 'old numbers from the logs are not shown as current');
+      assert.match(page, /read live from your Codex accounts/);
+
+      // Claude Code status line: added to Claude Code's settings without touching the rest.
+      const settingsFile = join(app.profile, 'home', '.claude', 'settings.json');
+      writeFileSync(settingsFile, JSON.stringify({ hooks: { Stop: [] }, model: 'opus' }));
+      const installed = await ui.eval(`return window.nuvia.installClaudeStatusLine()`);
+      assert.equal(installed.installed, true, JSON.stringify(installed));
+      const settings = JSON.parse(readFileSync(settingsFile, 'utf8'));
+      assert.deepEqual(settings.hooks, { Stop: [] });
+      assert.equal(settings.model, 'opus');
+      assert.match(settings.statusLine.command, /claude-statusline\.cjs/);
+      assert.ok(existsSync(`${settingsFile}.nuvia-backup`), 'a backup of settings.json is kept');
+      // Run the status line the way Claude Code does: it saves the limits and prints them.
+      const script = JSON.parse(settings.statusLine.command.replace(/^node /, ''));
+      const line = spawnSync(process.execPath, [script], { input: JSON.stringify({ model: { display_name: 'Opus 5.5' }, rate_limits: { five_hour: { used_percentage: 55, resets_at: Math.floor(Date.now() / 1000) + 3600 }, seven_day: { used_percentage: 9, resets_at: Math.floor(Date.now() / 1000) + 86400 } } }), encoding: 'utf8' });
+      assert.equal(line.stdout, 'Opus 5.5 · 5h 55% · 7d 9%');
+      const usage = await ui.eval(`return window.nuvia.aiUsage({})`);
+      assert.equal(usage.claude.web.session.percent, 42, 'claude.ai stays the first source when it answers');
+      assert.equal(usage.claude.statusLine.installed, true);
+      const again = await ui.eval(`return window.nuvia.installClaudeStatusLine()`);
+      assert.equal(again.error, undefined, 'installing twice is harmless');
+      writeFileSync(settingsFile, JSON.stringify({ statusLine: { type: 'command', command: 'my-own-line' } }));
+      assert.match((await ui.eval(`return window.nuvia.installClaudeStatusLine()`)).error, /status line of its own/);
+      assert.equal(JSON.parse(readFileSync(settingsFile, 'utf8')).statusLine.command, 'my-own-line', 'the user’s own status line is never replaced');
+
       await ui.eval(`[...document.querySelectorAll('#page-ai .card')][0].querySelector('.ai-head .btn').click()`);
       await ui.waitFor(`document.querySelector('#page-title').textContent === 'Claude'`);
       await click('[data-route="home"]');

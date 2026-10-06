@@ -486,6 +486,10 @@ button.chip:hover { color: var(--text); background: var(--surface-3); }
 .meter-top { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
 .meter-top strong { font-weight: 600; }
 .meter-top .pct { margin-left: auto; font: 600 13px var(--mono); }
+.ai-account + .ai-account { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.ai-account-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12.5px; min-width: 0; }
+.ai-account-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-offer { display: grid; gap: 8px; justify-items: start; margin-top: 10px; }
 .meter-bar { height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
 .meter-bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); transition: width .6s var(--ease); }
 .meter-bar i.warn { background: var(--warn); }

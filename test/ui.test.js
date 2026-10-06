@@ -38,6 +38,12 @@ function mockServer() {
     // TomTom-shaped live traffic: 35 min free-flow, 44 min now.
     if (url.pathname.startsWith('/routing/1/calculateRoute/')) {
       if (url.searchParams.get('key') !== 'TEST-TRAFFIC-KEY') { response.writeHead(403); return response.end('{}'); }
+      // Like TomTom: unknown parameters or values are rejected with 400 (instructionsType=none was).
+      const allowed = { traffic: ['true', 'false'], travelMode: ['car'], routeType: ['fastest', 'shortest', 'eco'], computeTravelTimeFor: ['none', 'all'], sectionType: ['traffic', 'toll', 'motorway'], instructionsType: ['coded', 'text', 'tagged'] };
+      for (const [name, value] of url.searchParams) {
+        if (name === 'key') continue;
+        if (!allowed[name]?.includes(value)) { response.writeHead(400, { 'Content-Type': 'application/json' }); return response.end(JSON.stringify({ message: `Invalid ${name} value: [${value}]`, code: 'BAD_INPUT' })); }
+      }
       return send({ routes: [{ summary: { travelTimeInSeconds: 2640, noTrafficTravelTimeInSeconds: 2100, trafficDelayInSeconds: 540, lengthInMeters: 37800 } }] });
     }
     if (url.pathname === '/cal.ics') {

@@ -130,7 +130,7 @@ function renderResult(ctx) {
       traffic ? h(`span.traffic.${route.traffic.level}`, icon(route.traffic.level === 'clear' ? 'check' : 'triangle-alert'), traffic) : null,
       // A drive without live traffic: say so, and where to turn it on.
       !traffic && route.trafficMissing ? h('button.link.traffic-missing', { type: 'button', title: route.trafficMissing === 'no-key' ? 'Live traffic needs a free TomTom key' : route.trafficMissing, on: { click: () => emit('open-settings', 'integrations') } },
-        icon('triangle-alert'), route.trafficMissing === 'no-key' ? 'no live traffic · add a free key' : 'live traffic unavailable · check the key') : null));
+        icon('triangle-alert'), route.trafficMissing === 'no-key' ? 'no live traffic · add a free key' : /refused/.test(route.trafficMissing) ? 'live traffic: the key was refused' : 'live traffic unavailable right now') : null));
   fill(steps,
     h('div.route-ends', h('div', h('b', 'A'), h('span', { title: route.origin.full || route.origin.label }, route.origin.label)), h('div', h('b', 'B'), h('span', { title: route.destination.full || route.destination.label }, route.destination.label))),
     route.steps.map(step => h('div.step', h('span.turn', icon(stepIcon(step))), h('span', step.text), h('small', step.type === 'arrive' ? '' : step.distance))));

@@ -14,6 +14,8 @@ test('the request asks for live traffic and both travel times', () => {
   assert.equal(url.searchParams.get('traffic'), 'true');
   assert.equal(url.searchParams.get('computeTravelTimeFor'), 'all');
   assert.equal(url.searchParams.get('key'), 'KEY-123');
+  // TomTom rejects instructionsType=none with HTTP 400: the parameter is left out.
+  assert.equal(url.searchParams.has('instructionsType'), false);
   assert.equal(trafficUrl('', A, B), null);
 });
 
@@ -76,4 +78,14 @@ test('a refused key or an outage never breaks the route', async () => {
   mode = 'denied';
   await traffic('KEY', A, B, 'car');
   assert.deepEqual(errors, ['offline', 'the traffic key was refused']);
+});
+
+test('TomTom’s own reason for a bad request reaches the log', async () => {
+  const errors = [];
+  const source = createTrafficSource({ fetchImpl: async () => reply(400, { message: 'Invalid InstructionsType value: [none]', code: 'BAD_INPUT' }), onError: error => errors.push(error.message) });
+  assert.equal(await source('KEY', A, B), null);
+  assert.deepEqual(errors, ['traffic service answered 400: Invalid InstructionsType value: [none]']);
+  const unauthorized = createTrafficSource({ fetchImpl: async () => reply(401, {}), onError: error => errors.push(error.message) });
+  await unauthorized('KEY', A, B);
+  assert.equal(errors.at(-1), 'the traffic key was refused');
 });

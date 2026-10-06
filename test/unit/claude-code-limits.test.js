@@ -57,3 +57,31 @@ test('Nuvia adds its status line but never replaces the user’s own', () => {
   assert.deepEqual(withNuviaStatusLine(next, '/p/claude-statusline.cjs'), next, 'installing twice changes nothing');
   assert.equal(withNuviaStatusLine({ statusLine: { type: 'command', command: '~/my-line.sh' } }, '/p/claude-statusline.cjs'), null);
 });
+
+test('claude.ai usage: old fields, and windows listed only in `limits`', async () => {
+  const { normalizeClaudeLimits } = await import('../../lib/usage.js');
+  const later = new Date(NOW + 3600000).toISOString();
+  const nextWeek = new Date(NOW + 5 * 86400000).toISOString();
+  assert.deepEqual(normalizeClaudeLimits({ five_hour: { utilization: 42, resets_at: later }, seven_day: { utilization: 17, resets_at: nextWeek } }, NOW).weekly, { percent: 17, resetsAt: Date.parse(nextWeek), stale: false });
+  // The shape seen in October 2026: seven_day is null, the session also sits in `limits`.
+  const listed = normalizeClaudeLimits({
+    five_hour: { utilization: 19, resets_at: later }, seven_day: null, seven_day_opus: null,
+    limits: [
+      { kind: 'session', group: 'session', percent: 19, resets_at: later, is_active: true },
+      { kind: 'weekly_all', group: 'weekly', percent: 61, resets_at: nextWeek, is_active: true },
+      { kind: 'weekly_opus', group: 'weekly', percent: 80, resets_at: nextWeek, is_active: false }
+    ]
+  }, NOW);
+  assert.equal(listed.session.percent, 19);
+  assert.equal(listed.weekly.percent, 61);
+  assert.equal(listed.weeklyOpus, null, 'inactive limits are skipped');
+});
+
+test('Claude Code’s cached usage in ~/.claude.json is read, nothing else', async () => {
+  const { readClaudeCodeCache } = await import('../../lib/usage.js');
+  const later = new Date(NOW + 3600000).toISOString();
+  const file = { oauthAccount: { emailAddress: 'x@y.z' }, projects: {}, cachedUsageUtilization: { fetchedAtMs: NOW - 8 * 60000, accountUuid: 'a', utilization: { five_hour: { utilization: 19, resets_at: later, limit_dollars: null }, seven_day: null, limits: [{ kind: 'session', group: 'session', percent: 19, resets_at: later, is_active: true }] } } };
+  assert.deepEqual(readClaudeCodeCache(JSON.stringify(file), NOW), { session: { percent: 19, resetsAt: Date.parse(later), stale: false }, weekly: null, weeklyOpus: null, weeklySonnet: null, updatedAt: NOW - 8 * 60000, source: 'claude-code' });
+  assert.equal(readClaudeCodeCache(JSON.stringify({ projects: {} }), NOW), null);
+  assert.equal(readClaudeCodeCache('{', NOW), null);
+});

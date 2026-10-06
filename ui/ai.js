@@ -26,6 +26,24 @@ function meter(label, percent, sub) {
     sub ? h('small', sub) : null);
 }
 
+// Codex counts what is left ("62% left"), so its bars do too: same number as in Codex.
+function leftMeter(label, used, sub) {
+  const left = Math.max(0, Math.min(100, 100 - Math.round(used ?? 0)));
+  return h('div.meter.left',
+    h('div.meter-top', h('strong', label), h('span.pct', `${left}% left`)),
+    h('div.meter-bar', h(`i${left <= 10 ? '.bad' : left <= 30 ? '.warn' : ''}`, { style: `width:${left}%` })),
+    sub ? h('small', sub) : null);
+}
+
+// 300 → "5 hours", 10080 → "Week", 43200 → "Month".
+function windowName(minutes, fallback) {
+  const m = Number(minutes) || fallback;
+  if (m <= 24 * 60) return `${Math.round(m / 60)} hours`;
+  if (Math.abs(m - 7 * 1440) < 1440) return 'Week';
+  if (Math.abs(m - 30 * 1440) < 3 * 1440) return 'Month';
+  return `${Math.round(m / 1440)} days`;
+}
+
 function stat(label, value) { return h('div.stat', h('small', label), h('b', value)); }
 
 function claudeMeters(claude) {
@@ -45,7 +63,7 @@ function claudeMeters(claude) {
 
 function claudeNote(claude) {
   const web = claude.web || {};
-  if (web.source === 'claude-code') return `Limits from Claude Code’s status line, ${relativeTime(web.updatedAt)}. They refresh whenever Claude Code runs.`;
+  if (web.source === 'claude-code') return `Limits from Claude Code, ${relativeTime(web.updatedAt)}: they refresh while Claude Code runs (terminal or VS Code).${web.webError ? ' claude.ai didn’t return them.' : ''}`;
   if (web.session || web.weekly) return `Limits read from claude.ai ${relativeTime(web.updatedAt)}.`;
   if (web.missing) return 'Add Claude as a service (claude.ai), or let Claude Code report its limits, to see plan percentages.';
   if (web.loggedOut) return 'Sign in to claude.ai in the Claude service, or let Claude Code report its limits, to see plan percentages.';
@@ -74,13 +92,12 @@ function claudeStatusLineOffer(claude) {
 function codexWindowMeters(limits, measured) {
   const rows = [];
   const sub = text => [text, measured].filter(Boolean).join(' · ');
-  const hours = limits.session ? Math.round((limits.session.windowMinutes || 300) / 60) : 5;
-  if (limits.session) {
-    rows.push(limits.session.stale
-      ? meter(`Session · ${hours} hours`, 0, sub('window has since reset'))
-      : meter(`Session · ${hours} hours`, limits.session.percent, sub(resetText(limits.session.resetsAt))));
+  for (const [window, fallback] of [[limits.session, 300], [limits.weekly, 10080]]) {
+    if (!window) continue;
+    const name = windowName(window.windowMinutes, fallback);
+    const label = name.endsWith('hours') ? `Session · ${name}` : name;
+    rows.push(window.stale ? leftMeter(label, 0, sub('window has since reset')) : leftMeter(label, window.percent, sub(window.resetsAt ? resetText(window.resetsAt) : 'reset')));
   }
-  if (limits.weekly) rows.push(meter('Week', limits.weekly.percent, sub(limits.weekly.resetsAt ? resetText(limits.weekly.resetsAt) : 'reset')));
   return rows;
 }
 
@@ -145,7 +162,7 @@ defineWidget({
   render(ctx) {
     const usage = state.usage;
     if (!usage) { ctx.setMeta('reading logs…'); return fill(ctx.body, skeleton(3)); }
-    const soonest = [usage.claude?.web?.session?.resetsAt, usage.claude?.block?.resetsAt, usage.codex?.session?.resetsAt].filter(Boolean).sort()[0];
+    const soonest = [usage.claude?.web?.session?.resetsAt, usage.claude?.block?.resetsAt, usage.codex?.session?.resetsAt].filter(Boolean).sort((a, b) => a - b)[0];
     ctx.setMeta(soonest ? `next reset in ${countdown(soonest - Date.now())}` : 'limits and tokens');
     fill(ctx.body, h('div.ai-grid', column('claude', usage.claude, { compact: true }), column('codex', usage.codex, { compact: true })));
   }

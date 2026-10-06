@@ -9,7 +9,7 @@ import { geocode } from './lib/geocode.js';
 import { routeUrl, summarizeRoute, MODES } from './lib/route.js';
 import { parseICS, expandEvents } from './lib/ics.js';
 import { parseChatRow, parseMailLines, parseAgendaText, sortFeed, unreadFromTitle, chatTimeToDate } from './lib/feed.js';
-import { normalizeClaudeLimits, codexUsage, claudeUsage, readClaudeCodeLimits } from './lib/usage.js';
+import { normalizeClaudeLimits, codexUsage, claudeUsage, readClaudeCodeLimits, readClaudeCodeCache } from './lib/usage.js';
 import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-statusline.js';
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
 import { readInfo, defaultRules } from './lib/extensions.js';
@@ -1509,7 +1509,8 @@ async function readClaudeWebLimits(force) {
   if (!data?.usage) data = await withHiddenPage(service.id, 'https://claude.ai/settings/usage', read, { settle: 2000 });
   const limits = normalizeClaudeLimits(data?.usage);
   const value = limits && (limits.session || limits.weekly) ? { ...limits, plan: data.plan, updatedAt: Date.now() } : { loggedOut: Boolean(data?.loggedOut), error: data?.error || (data ? 'Limits unavailable' : 'claude.ai unreachable') };
-  if (value.error) log('claude limits', value.loggedOut ? 'signed out of claude.ai' : value.error, data?.status ? `HTTP ${data.status}` : '');
+  // Field names and HTTP codes only, never values: enough to see what changed.
+  if (value.error) log('claude limits', value.loggedOut ? 'signed out of claude.ai' : value.error, data?.status ? `HTTP ${data.status}` : '', data?.tried ? JSON.stringify(data.tried) : '', data?.usage ? `keys ${Object.keys(data.usage).join(',')}` : '');
   Object.assign(claudeWeb, { at: Date.now(), value });
   return value;
 }
@@ -1552,8 +1553,13 @@ async function codexAccounts(force) {
 // Claude Code's own plan limits, saved by the status line script Nuvia can install
 // (lib/claude-statusline.js). Used when claude.ai does not answer.
 const claudeCodeFiles = { limits: () => fileInProfile('claude-limits.json'), script: () => fileInProfile('claude-statusline.cjs'), settings: () => join(CLAUDE_HOME, 'settings.json') };
+// ~/.claude.json, or .claude.json inside CLAUDE_CONFIG_DIR when that is set.
+const claudeCodeState = () => (process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : join(homedir(), '.claude.json'));
 function claudeCodeLimits() {
-  try { return readClaudeCodeLimits(readFileSync(claudeCodeFiles.limits(), 'utf8')); } catch { return null; }
+  // The newest of: Claude Code's own cached usage, and what its status line saved.
+  const read = (file, parse) => { try { return parse(readFileSync(file, 'utf8')); } catch { return null; } };
+  const found = [read(claudeCodeState(), readClaudeCodeCache), read(claudeCodeFiles.limits(), readClaudeCodeLimits)].filter(Boolean);
+  return found.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
 }
 function claudeStatusLineState() {
   const settings = readJson(claudeCodeFiles.settings(), {});

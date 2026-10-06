@@ -263,7 +263,7 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
     });
 
     await t.test('Claude & Codex: limits, resets and tokens', async () => {
-      await ui.waitFor(`/71%/.test(document.querySelector('.widget[data-widget="ai"] .w-body')?.innerText) && /42%/.test(document.querySelector('.widget[data-widget="ai"] .w-body').innerText)`, { timeout: 40000 });
+      await ui.waitFor(`/29% left/.test(document.querySelector('.widget[data-widget="ai"] .w-body')?.innerText) && /42%/.test(document.querySelector('.widget[data-widget="ai"] .w-body').innerText)`, { timeout: 40000 });
       await click('[data-route="ai"]');
       await ui.waitFor(`document.querySelectorAll('#page-ai .card').length === 2`);
       const page = await text('#page-ai');
@@ -275,8 +275,9 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       // Codex: one block of bars per account, read live, not the numbers left in the logs.
       const accounts = await ui.eval(`return [...document.querySelectorAll('#page-ai .ai-account')].map(block => block.innerText.replace(/\\s+/g, ' '))`);
       assert.equal(accounts.length, 2, 'one block per Codex account');
-      assert.match(accounts[0], /\.codex-personal@example\.test.*plus.*12%.*40%/);
-      assert.match(accounts[1], /\.codex-work@example\.test.*pro.*71%.*40%/);
+      // Like Codex itself: what is left (12% used → 88% left), and each window by its name.
+      assert.match(accounts[0], /\.codex-personal@example\.test.*plus.*Session · 5 hours 88% left.*Week 60% left/);
+      assert.match(accounts[1], /\.codex-work@example\.test.*pro.*Session · 5 hours 29% left.*Week 60% left/);
       assert.doesNotMatch(accounts.join(' '), /63%/, 'old numbers from the logs are not shown as current');
       assert.match(page, /read live from your Codex accounts/);
 

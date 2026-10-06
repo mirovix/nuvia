@@ -56,9 +56,12 @@ test('claudeBlocks starts a new block after 5 hours', () => {
 });
 
 test('normalizeClaudeLimits', () => {
-  const limits = normalizeClaudeLimits({ five_hour: { utilization: 41.6, resets_at: '2026-09-29T17:00:00Z' }, seven_day: { utilization: 12, resets_at: null }, seven_day_opus: null });
-  assert.deepEqual(limits.session, { percent: 42, resetsAt: Date.parse('2026-09-29T17:00:00Z') });
-  assert.deepEqual(limits.weekly, { percent: 12, resetsAt: null });
+  const before = Date.parse('2026-09-29T15:00:00Z');
+  const limits = normalizeClaudeLimits({ five_hour: { utilization: 41.6, resets_at: '2026-09-29T17:00:00Z' }, seven_day: { utilization: 12, resets_at: null }, seven_day_opus: null }, before);
+  assert.deepEqual(limits.session, { percent: 42, resetsAt: Date.parse('2026-09-29T17:00:00Z'), stale: false });
+  assert.deepEqual(limits.weekly, { percent: 12, resetsAt: null, stale: false });
+  // Once the window has reset, nothing is used in it yet.
+  assert.deepEqual(normalizeClaudeLimits({ five_hour: { utilization: 41.6, resets_at: '2026-09-29T17:00:00Z' } }, before + 3 * 3600000).session, { percent: 0, resetsAt: null, stale: true });
   assert.equal(limits.weeklyOpus, null);
   assert.equal(normalizeClaudeLimits(null), null);
 });

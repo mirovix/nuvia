@@ -6,6 +6,13 @@ import { openAddService } from './services.js';
 const view = { tab: 'library', library: null, results: null, query: '', searching: false, tint: '' };
 let busy = false;
 
+// Paused for longer than this, the overview closes the player.
+export const CLOSE_AFTER_PAUSE_MS = 2 * 60000;
+let pausedSince = 0;
+let closeTimer = 0;
+const closeAfter = () => window.__nuviaTestPauseMs ?? CLOSE_AFTER_PAUSE_MS; // tests shorten the wait
+const playerClosed = music => Boolean(music?.paused && pausedSince && Date.now() - pausedSince >= closeAfter());
+
 export async function refreshMusic() {
   if (busy) return;
   busy = true;
@@ -13,6 +20,13 @@ export async function refreshMusic() {
     const next = await api.musicState();
     const changed = JSON.stringify(next) !== JSON.stringify(state.music);
     state.music = next;
+    if (next?.title && next.paused) {
+      if (!pausedSince) {
+        pausedSince = Date.now();
+        clearTimeout(closeTimer);
+        closeTimer = setTimeout(() => emit('music'), closeAfter() + 50);
+      }
+    } else { pausedSince = 0; clearTimeout(closeTimer); }
     if (changed) emit('music');
   } catch (error) { console.error(error); } finally { busy = false; }
   const playing = state.music?.title && !state.music.paused;
@@ -99,6 +113,12 @@ defineWidget({
     if (blocked) { ctx.setMeta(''); return fill(ctx.body, empty(blocked.icon, blocked.title, blocked.text, blocked.action)); }
     ctx.setMeta(music.paused ? 'paused' : 'playing');
     if (!music.title) return fill(ctx.body, empty('disc-3', 'Nothing playing', 'Pick a playlist from the player.', h('button.btn.sm', { on: { click: () => emit('go', 'music') } }, icon('library'), 'Library')));
+    // Paused for more than two minutes: the player closes here (the track stays in Spotify).
+    if (playerClosed(music)) {
+      ctx.setMeta('');
+      return fill(ctx.body, empty('disc-3', 'Nothing playing', 'Paused for a while.',
+        h('div.inline', h('button.btn.sm.accent#music-resume', { on: { click: () => control('play') } }, icon('play'), 'Resume'), h('button.btn.sm', { on: { click: () => emit('go', 'music') } }, icon('library'), 'Library'))));
+    }
     fill(ctx.body, h('div.music-widget',
       // The artist only while it plays: a paused track shows just what it is.
       h('div.player', cover(music), h('div.track', h('strong', music.title), !music.paused && music.artist ? h('span.artist', music.artist) : null, music.album ? h('span.muted', music.album) : null)),

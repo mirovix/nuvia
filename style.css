@@ -644,3 +644,24 @@ body[data-platform='darwin'].sidebar-collapsed .brand { padding: 30px 0 0; }
 .route-summary .traffic svg.i { width: 13px; height: 13px; }
 .route-summary .traffic.slow { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .route-summary .traffic.heavy { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+
+/* Weather card: now, details, next hours, next days */
+.wx-now { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.wx-big { width: 46px; height: 46px; border-radius: 13px; color: var(--accent); background: var(--accent-soft); }
+.wx-range { margin-left: auto; display: grid; gap: 2px; text-align: right; font: 500 12.5px var(--mono); color: var(--text-2); }
+.wx-details { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; margin-bottom: 14px; }
+.wx-detail { padding: 8px 10px; border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.wx-detail small { display: block; color: var(--text-3); font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+.wx-detail b { display: block; font-weight: 600; font-size: 13px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-title { margin: 4px 0 8px; font-size: 12px; font-weight: 600; color: var(--text-3); }
+.wx-hours { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; margin-bottom: 14px; }
+.wx-hour { padding: 8px 4px; text-align: center; display: grid; justify-items: center; gap: 3px; }
+.wx-hour b { font-size: 12.5px; margin: 0; }
+.wx-rain { color: var(--accent); font: 500 11px var(--mono); min-height: 13px; }
+.wx-days { display: grid; gap: 4px; }
+.wx-day { display: grid; grid-template-columns: 44px 22px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.wx-day-name { font-weight: 600; }
+.wx-day-temp { font-size: 12.5px; }
+.traffic-missing { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; font-size: 12px; color: var(--text-3); }
+.traffic-missing:hover { color: var(--accent); }
+.traffic-missing svg { width: 13px; height: 13px; }

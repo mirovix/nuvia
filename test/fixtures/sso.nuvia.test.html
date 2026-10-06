@@ -10,7 +10,17 @@
       event.preventDefault();
       sessionStorage.setItem('user', event.target.username.value);
       history.pushState(null, '', '/idp/password');
-      step2();
+      // Like Microsoft for an account with a passkey: offer face/fingerprint/PIN first.
+      if (typeof window.PublicKeyCredential !== 'undefined' || localStorage.getItem('alwaysPasskey')) passkey(); else step2();
+    });
+  };
+  const passkey = () => {
+    app.innerHTML = '<h2>Use your face, fingerprint, PIN or security key</h2><button id="pk">Next</button><a href="#" id="other">Other ways to sign in</a>';
+    document.getElementById('pk').addEventListener('click', () => { document.title = 'passkey-chosen'; });
+    document.getElementById('other').addEventListener('click', event => {
+      event.preventDefault();
+      app.innerHTML = '<h2>Other ways to sign in</h2><div role="button" id="pw">Use your password</div><div role="button">Send a code</div>';
+      document.getElementById('pw').addEventListener('click', step2);
     });
   };
   const step2 = () => {

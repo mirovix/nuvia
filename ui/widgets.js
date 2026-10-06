@@ -141,7 +141,7 @@ async function iasAction(action) {
   const result = action === 'enter' ? await api.iasEnter(lab) : await api.iasExit();
   ias.busy = false; ias.state = result; ias.message = result.message;
   emit('ias');
-  api.addNotification({ title: 'IAS Lab', body: result.message, type: result.ok ? 'success' : 'error' });
+  api.addNotification({ title: 'IAS Lab', body: result.message, type: result.ok ? 'success' : 'error', widget: 'ias' });
 }
 
 defineWidget({
@@ -180,7 +180,14 @@ export async function refreshWeather() {
   try {
     const geo = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`)).json();
     const place = geo.results?.[0]; if (!place) throw new Error('City not found');
-    const data = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,weather_code,is_day,apparent_temperature,wind_speed_10m&hourly=temperature_2m,weather_code,precipitation_probability&daily=temperature_2m_max,temperature_2m_min&forecast_hours=12&timezone=auto`)).json();
+    const params = new URLSearchParams({
+      latitude: place.latitude, longitude: place.longitude, timezone: 'auto', forecast_days: '6', forecast_hours: '24',
+      current: 'temperature_2m,weather_code,is_day,apparent_temperature,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,pressure_msl,cloud_cover',
+      hourly: 'temperature_2m,weather_code,precipitation_probability,is_day',
+      daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset,uv_index_max'
+    });
+    const data = await (await fetch(`https://api.open-meteo.com/v1/forecast?${params}`)).json();
+    if (data.error) throw new Error(data.reason || 'Weather unavailable');
     state.weather = { city: place.name, ...data };
   } catch (error) { state.weather = { error: error.message, city }; }
   emit('weather');
@@ -196,18 +203,48 @@ function renderWeatherCard() {
     h('div.wx-meta', h('b', weather.city), h('span', label), h('span.mono', `${Math.round(weather.daily.temperature_2m_min[0])}° / ${Math.round(weather.daily.temperature_2m_max[0])}°`)));
 }
 
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const compass = degrees => COMPASS[Math.round(((Number(degrees) % 360) + 360) % 360 / 45) % 8];
+const uvLabel = uv => (uv >= 8 ? 'very high' : uv >= 6 ? 'high' : uv >= 3 ? 'moderate' : 'low');
+const weekday = date => new Date(`${date}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short' });
+const wxIcon = (code, day = 1) => { const name = WMO(code)[0]; return !day && name === 'sun' ? 'moon' : !day && name === 'cloud-sun' ? 'cloud-moon' : name; };
+
 defineWidget({
   id: 'weather', title: 'Weather', icon: 'cloud-sun', size: 's', topics: ['weather'],
   render(ctx) {
     const weather = state.weather;
     if (!weather) return fill(ctx.body, skeleton(3));
     if (weather.error) return fill(ctx.body, empty('cloud', 'Weather unavailable', weather.error));
-    const [name, label] = WMO(weather.current.weather_code);
-    ctx.setMeta(`${weather.city} · feels like ${Math.round(weather.current.apparent_temperature)}°`);
-    const hours = weather.hourly.time.map((time, index) => ({ time, temp: weather.hourly.temperature_2m[index], code: weather.hourly.weather_code[index], rain: weather.hourly.precipitation_probability?.[index] })).slice(0, 8);
-    fill(ctx.body,
-      h('div', { style: 'display:flex;align-items:center;gap:14px;margin-bottom:14px' }, h('span.w-icon', { style: 'width:46px;height:46px;border-radius:13px;color:var(--accent);background:var(--accent-soft)' }, icon(name)), h('div', h('div.big-stat', `${Math.round(weather.current.temperature_2m)}°`), h('span.dim', label))),
-      h('div', { style: 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px' }, hours.map(hour => h('div.stat', { style: 'padding:8px;text-align:center' }, h('small', hour.time.slice(11, 16)), icon(WMO(hour.code)[0]), h('div.mono', { style: 'font-size:12px;margin-top:2px' }, `${Math.round(hour.temp)}°${hour.rain ? ` · ${hour.rain}%` : ''}`)))));
+    const now = weather.current; const daily = weather.daily || {};
+    const [, label] = WMO(now.weather_code);
+    const compact = ctx.size === 's';
+    ctx.setMeta(`${weather.city} · feels like ${Math.round(now.apparent_temperature)}°`);
+    // Hours from now on (the API starts at the current hour).
+    const hours = weather.hourly.time.map((time, index) => ({ time, temp: weather.hourly.temperature_2m[index], code: weather.hourly.weather_code[index], rain: weather.hourly.precipitation_probability?.[index], day: weather.hourly.is_day?.[index] ?? 1 })).slice(0, compact ? 4 : 12);
+    const head = h('div.wx-now',
+      h('span.w-icon.wx-big', icon(wxIcon(now.weather_code, now.is_day))),
+      h('div', h('div.big-stat', `${Math.round(now.temperature_2m)}°`), h('span.dim', label)),
+      daily.temperature_2m_max ? h('div.wx-range', h('span', `↑ ${Math.round(daily.temperature_2m_max[0])}°`), h('span', `↓ ${Math.round(daily.temperature_2m_min[0])}°`)) : null);
+    const hourly = h('div.wx-hours', hours.map(hour => h('div.stat.wx-hour', h('small', hour.time.slice(11, 16)), icon(wxIcon(hour.code, hour.day)), h('b.mono', `${Math.round(hour.temp)}°`), h('small.wx-rain', hour.rain ? `${hour.rain}%` : ''))));
+    if (compact) return fill(ctx.body, head, hourly);
+    const time = value => (value ? value.slice(11, 16) : '–');
+    const details = h('div.wx-details',
+      [['Feels like', `${Math.round(now.apparent_temperature)}°`],
+        ['Humidity', `${Math.round(now.relative_humidity_2m)}%`],
+        ['Wind', `${Math.round(now.wind_speed_10m)} km/h ${compass(now.wind_direction_10m)}`],
+        ['Gusts', `${Math.round(now.wind_gusts_10m)} km/h`],
+        ['Rain today', `${(daily.precipitation_sum?.[0] ?? 0).toFixed(1)} mm · ${daily.precipitation_probability_max?.[0] ?? 0}%`],
+        ['UV index', `${Math.round(daily.uv_index_max?.[0] ?? 0)} · ${uvLabel(daily.uv_index_max?.[0] ?? 0)}`],
+        ['Sunrise', time(daily.sunrise?.[0])],
+        ['Sunset', time(daily.sunset?.[0])],
+        ['Clouds', `${Math.round(now.cloud_cover)}%`],
+        ['Pressure', `${Math.round(now.pressure_msl)} hPa`]
+      ].map(([name, value]) => h('div.wx-detail', h('small', name), h('b', value))));
+    const days = (daily.time || []).slice(1, 6).map((date, i) => h('div.wx-day',
+      h('span.wx-day-name', weekday(date)), icon(wxIcon(daily.weather_code[i + 1])),
+      h('span.wx-rain', daily.precipitation_probability_max?.[i + 1] ? `${daily.precipitation_probability_max[i + 1]}%` : ''),
+      h('span.mono.wx-day-temp', `${Math.round(daily.temperature_2m_min[i + 1])}° / ${Math.round(daily.temperature_2m_max[i + 1])}°`)));
+    fill(ctx.body, head, details, h('h4.wx-title', 'Next hours'), hourly, days.length ? h('h4.wx-title', 'Next days') : null, days.length ? h('div.wx-days', days) : null);
   }
 });
 

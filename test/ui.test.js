@@ -260,6 +260,14 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       await spotify.waitFor(`window.log.includes('track:1')`);
       spotify.close();
       await click('[data-route="home"]');
+      // Paused for long enough (2 minutes, shortened here): the overview closes the player.
+      await ui.waitFor(`window.__nuviaDebug.state.music.paused === false`, { timeout: 20000 });
+      await ui.eval(`window.__nuviaTestPauseMs = 1500; document.querySelector('.widget[data-widget="music"] .play').click()`);
+      await ui.waitFor(`document.querySelector('.widget[data-widget="music"] #music-resume')`, { timeout: 20000 });
+      assert.doesNotMatch(await text('.widget[data-widget="music"]'), /Artist|Clouds|Clear Skies/);
+      await ui.eval(`document.querySelector('#music-resume').click()`);
+      await ui.waitFor(`document.querySelector('.widget[data-widget="music"] .track strong')?.textContent.length > 0 && !document.querySelector('#music-resume')`, { timeout: 20000 });
+      await ui.eval(`delete window.__nuviaTestPauseMs`);
     });
 
     await t.test('Claude & Codex: limits, resets and tokens', async () => {
@@ -330,12 +338,13 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       assert.match(await text('.route-steps'), /Turn right onto Via San Massimo/);
       const prefs = await ui.eval('return window.nuvia.getPreferences()');
       assert.equal(prefs.homeOriginPlace.label, 'Via Giovanni Battista Tiepolo, Padova');
-      assert.doesNotMatch(result.summary, /traffic/i, 'without a key Nuvia says nothing about traffic');
+      // Without a key the card says there is no live traffic and leads to the key.
+      assert.match(result.summary, /no live traffic · add a free key/);
+      assert.doesNotMatch(result.summary, /min traffic|clear roads/, 'no made-up traffic');
 
       // Live traffic: a TomTom key turns the free-flow time into the real one.
-      await click('#open-settings');
-      await ui.waitFor(`document.querySelector('#settings-dialog[open]')`);
-      await ui.eval(`document.querySelector('#settings-dialog .tabs [data-tab="integrations"]').click()`);
+      await ui.eval(`document.querySelector('.route-summary .traffic-missing').click()`);
+      await ui.waitFor(`document.querySelector('#settings-dialog[open] #traffic-key')`);
       await ui.eval(`const k = document.querySelector('#traffic-key'); k.value = 'TEST-TRAFFIC-KEY'; k.dispatchEvent(new Event('change'))`);
       await ui.eval(`document.querySelector('#settings-dialog').close()`);
       await ui.waitFor(`/\\+9 min traffic/.test(document.querySelector('.route-summary')?.innerText || '')`, { timeout: 20000 });
@@ -396,6 +405,16 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       assert.deepEqual(await titles(), ['Other']);
       await ui.eval(`await window.nuvia.removeNotification(null)`);
       await click('[data-route="home"]');
+      // A card hidden from the overview sends no notifications; shown again, it does.
+      const setTrainCard = hidden => ui.eval(`const prefs = await window.nuvia.getPreferences(); const widgets = (prefs.widgets || []).filter(w => w.id !== 'train'); widgets.push({ id: 'train', size: 's', height: 'normal', hidden: ${hidden}, options: {} }); await window.nuvia.savePreferences({ ...prefs, widgets }); return true`);
+      await setTrainCard(true);
+      assert.equal(await ui.eval(`return window.nuvia.addNotification({ title: 'Train 2201', body: '+12 min', type: 'train' })`), null);
+      assert.equal(await ui.eval(`return window.nuvia.addNotification({ title: 'IAS Lab', body: 'x', type: 'success', widget: 'train' })`), null);
+      assert.deepEqual(await titles(), []);
+      await setTrainCard(false);
+      await ui.eval(`await window.nuvia.addNotification({ title: 'Train 2201', body: '+12 min', type: 'train' })`);
+      assert.deepEqual(await titles(), ['Train 2201']);
+      await ui.eval(`await window.nuvia.removeNotification(null)`);
     });
 
     await t.test('widgets: options, sizes, hide, customize and drag', async () => {
@@ -483,7 +502,12 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
     await t.test('staying signed in: automatic sign-in on expired sessions, session cookies kept', async () => {
       const portalPage = () => app.page(target => target.type === 'page' && target.url.startsWith('https://portal.nuvia.test'), 30000);
       await ui.eval(`document.querySelector('.service[data-id="portal"]').click()`);
-      await app.page(target => target.type === 'page' && target.url.startsWith('https://sso.nuvia.test'), 30000);
+      const firstSso = await app.page(target => target.type === 'page' && target.url.startsWith('https://sso.nuvia.test'), 30000);
+      // No passkeys on sign-in pages; when a page still offers face/fingerprint/PIN,
+      // the automatic sign-in takes "Other ways to sign in" → "Use your password".
+      assert.equal(await firstSso.eval('return typeof window.PublicKeyCredential'), 'undefined');
+      await firstSso.eval(`localStorage.setItem('alwaysPasskey', '1'); return true`);
+      firstSso.close();
       await ui.eval(`window.__nuviaDebug.openEditService('portal')`);
       await ui.waitFor(`document.querySelectorAll('#signin-box input').length === 2 && document.querySelector('#signin-box').closest('dialog').open`);
       await ui.eval(`const [u, p] = document.querySelectorAll('#signin-box input'); u.value = 'mario.rossi@studenti.example.edu'; p.value = 'Segreta-123'; [...document.querySelectorAll('#signin-box button')].find(b => /Turn on|Update/.test(b.innerText)).click()`);
@@ -493,6 +517,11 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       let portal = await portalPage();
       assert.match(await portal.waitFor(`document.querySelector('h1')?.innerText`, { timeout: 30000 }), /Inbox/);
       await ui.waitFor(`window.nuvia.listNotifications().then(list => list.some(n => /Signed back in automatically/.test(n.body)))`, { timeout: 15000 });
+      // The log shows each step (site and step only): here the face/PIN page was passed.
+      const signInLog = readFileSync(join(app.profile, 'nuvia.log'), 'utf8').split('\n').filter(line => / sign-in /.test(line));
+      assert.ok(signInLog.some(line => /sso\.nuvia\.test continue/.test(line)), signInLog.join('\n'));
+      assert.ok(signInLog.some(line => /sso\.nuvia\.test password/.test(line)), signInLog.join('\n'));
+      assert.ok(!signInLog.join('\n').includes('Segreta-123'), 'no password in the log');
       const stored = await ui.eval(`return window.nuvia.signInGet('portal')`);
       assert.deepEqual([stored.saved, stored.username], [true, 'mario.rossi@studenti.example.edu']);
       assert.equal(stored.password, undefined, 'the password never goes back to the UI');
@@ -509,9 +538,11 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       assert.equal((await ui.eval(`return window.nuvia.signInGet('portal')`)).saved, false);
       // Signing in by hand once is enough: Nuvia remembers it and reconnects by itself later.
       portal = await portalPage();
+      await portal.eval(`return true`);
       await portal.eval(`localStorage.removeItem('session'); location.reload(); return true`).catch(() => {});
       portal.close();
       const sso = await app.page(target => target.type === 'page' && target.url.startsWith('https://sso.nuvia.test'), 30000);
+      await sso.eval(`localStorage.removeItem('alwaysPasskey'); return true`);
       await sso.waitFor(`document.querySelector('input[name=username]')`);
       await sso.eval(`const u = document.querySelector('input[name=username]'); u.value = 'mario.rossi@studenti.example.edu'; document.querySelector('button').click(); return true`);
       await sso.waitFor(`document.querySelector('input[type=password]')`);

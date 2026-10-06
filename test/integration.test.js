@@ -73,6 +73,17 @@ test('Nuvia with the real services', { timeout: 600000 }, async t => {
     await t.test('weather', async () => {
       await ui.waitFor(`window.__nuviaDebug.state.weather && !window.__nuviaDebug.state.weather.error`, { timeout: 30000 });
       assert.match(await ui.eval(`return document.querySelector('#weather-card').innerText`), /Padova|Padua/);
+      // A wide card shows the details, the next hours and the next days.
+      await ui.eval(`const prefs = await window.nuvia.getPreferences(); const widgets = (prefs.widgets || []).filter(w => w.id !== 'weather'); widgets.push({ id: 'weather', size: 'm', height: 'tall', hidden: false, options: {} }); await window.nuvia.savePreferences({ ...prefs, widgets }); return true`);
+      await ui.eval(`location.reload()`).catch(() => {});
+      await sleep(1500);
+      ui.close();
+      ui = await app.ui();
+      await ui.waitFor(`document.querySelectorAll('.widget[data-widget="weather"] .wx-day').length === 5`, { timeout: 30000 });
+      const card = await ui.eval(`return document.querySelector('.widget[data-widget="weather"]').innerText`);
+      for (const label of ['Feels like', 'Humidity', 'Wind', 'Gusts', 'Rain today', 'UV index', 'Sunrise', 'Sunset', 'Next hours', 'Next days']) assert.match(card, new RegExp(label, 'i'));
+      assert.match(card, /km\/h (N|NE|E|SE|S|SW|W|NW)/);
+      assert.equal(await ui.eval(`return document.querySelectorAll('.widget[data-widget="weather"] .wx-hour').length`), 12);
     });
 
     await t.test('Streak from the Chrome Web Store: Gmail only and Nuvia stays up', async () => {

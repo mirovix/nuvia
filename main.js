@@ -384,18 +384,21 @@ function signInCredentials(serviceId) {
 }
 
 const signInState = new Map();
+const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
 async function watchSignIn(service, contents) {
   if (contents.isDestroyed()) return;
   const url = contents.getURL();
   const state = signInState.get(service.id) || { attempts: [], inFlow: false, noticeAt: 0, mfaAt: 0, signedIn: false };
   signInState.set(service.id, state);
   if (!isSignInUrl(url)) {
+    if (state.inFlow) log('sign-in', service.name, state.auto ? 'signed back in automatically' : 'left the sign-in page', hostOf(url));
     if (state.inFlow && state.auto) addNotification({ title: service.name, body: 'Signed back in automatically.', type: 'success', serviceId: service.id });
-    Object.assign(state, { inFlow: false, auto: false, signedIn: true });
+    Object.assign(state, { inFlow: false, auto: false, signedIn: true, inFlowLogged: false });
     return;
   }
   state.inFlow = true;
   const credentials = signInCredentials(service.id);
+  if (!state.inFlowLogged) { state.inFlowLogged = true; log('sign-in', service.name, 'session expired, sign-in page', hostOf(url), credentials ? 'credentials saved' : 'no credentials'); }
   if (!credentials) {
     // Only warn about services that were signed in before, at most every 2 hours.
     if (state.signedIn && Date.now() - state.noticeAt > 2 * 3600000) {
@@ -405,10 +408,12 @@ async function watchSignIn(service, contents) {
     return;
   }
   state.attempts = state.attempts.filter(at => Date.now() - at < 5 * 60000);
-  if (state.attempts.length >= 8) return; // never loop on a failing sign-in
+  if (state.attempts.length >= 14) return; // never loop on a failing sign-in
   state.attempts.push(Date.now());
   await sleep(900);
   const action = await run(contents, `(${fillSignIn.toString()})(${JSON.stringify(credentials.username)}, ${JSON.stringify(credentials.password)})`, 5000, 'none');
+  // Which site and which step, never what was typed: enough to see where a sign-in stops.
+  log('sign-in', service.name, hostOf(url), action);
   if (action !== 'none') state.auto = true;
   // Multi-step pages (email, then password) change without a reload: look again.
   if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(() => { if (!contents.isDestroyed() && isSignInUrl(contents.getURL())) watchSignIn(service, contents); }, 2500);
@@ -612,7 +617,15 @@ async function installMarketplaceExtension(id) {
 
 // The desktop pop-ups still on screen, so they go away with the notification.
 const nativeNotifications = new Map();
+// The overview card each kind of notification belongs to. A hidden card sends none.
+const NOTIFICATION_WIDGET = { mail: 'mail', message: 'messages', train: 'train' };
+function widgetShown(id) {
+  const entry = (preferences().widgets || []).find(item => item.id === id);
+  return !entry?.hidden;
+}
 function addNotification(item) {
+  const widget = item.widget || NOTIFICATION_WIDGET[item.type];
+  if (widget && !widgetShown(widget)) return null;
   const notifications = readJson(paths.notifications(), []);
   const entry = { id: crypto.randomUUID(), time: new Date().toISOString(), read: false, ...item };
   writeJson(paths.notifications(), [entry, ...notifications].slice(0, 150));
@@ -1220,10 +1233,11 @@ async function locateByIp() {
   return null;
 }
 // Live traffic, only when a key is configured (see lib/traffic.js).
+let lastTrafficError = '';
 const liveTraffic = createTrafficSource({
   fetchImpl: (url, options) => net.fetch(url, options),
   baseUrl: process.env.NUVIA_TRAFFIC_URL || undefined,
-  onError: error => log('traffic', error.message)
+  onError: error => { lastTrafficError = error.message; log('traffic', error.message); }
 });
 
 const geocodeOptions = { baseUrl: NOMINATIM, fetchImpl: (url, options) => net.fetch(url, options), userAgent: 'Nuvia/0.6 (desktop dashboard; https://github.com/)' };
@@ -1256,10 +1270,14 @@ handle('commute:route', async ({ origin, destination, city, mode = 'car', coordi
   }
   if (!summary) throw new Error('Route unavailable right now');
   // The map and the directions stay OSRM's; traffic only adds the live delay on top.
-  const live = await liveTraffic(String(preferences().trafficKey || '').trim(), start, end, profile);
+  const trafficKey = String(preferences().trafficKey || '').trim();
+  lastTrafficError = '';
+  const live = await liveTraffic(trafficKey, start, end, profile);
   const traffic = live ? { ...live, freeMinutes: summary.minutes, level: trafficLevel({ delayMinutes: live.delayMinutes, freeMinutes: summary.minutes }) } : null;
   const minutes = traffic ? summary.minutes + traffic.delayMinutes : summary.minutes;
-  return { ...summary, minutes, traffic, mode: profile, origin: start, destination: end, originChoices: originChoices.slice(0, 4), destinationChoices: destinationChoices.slice(0, 4), arrival: Date.now() + minutes * 60000 };
+  // Why a drive has no live traffic, so the card can say what to do about it.
+  const trafficMissing = profile !== 'car' || traffic ? null : !trafficKey ? 'no-key' : (lastTrafficError || 'unavailable');
+  return { ...summary, minutes, traffic, trafficMissing, mode: profile, origin: start, destination: end, originChoices: originChoices.slice(0, 4), destinationChoices: destinationChoices.slice(0, 4), arrival: Date.now() + minutes * 60000 };
 });
 
 // ---------------------------------------------------------------------------
@@ -1554,6 +1572,7 @@ async function codexAccounts(force) {
 // (lib/claude-statusline.js). Used when claude.ai does not answer.
 const claudeCodeFiles = { limits: () => fileInProfile('claude-limits.json'), script: () => fileInProfile('claude-statusline.cjs'), settings: () => join(CLAUDE_HOME, 'settings.json') };
 // ~/.claude.json, or .claude.json inside CLAUDE_CONFIG_DIR when that is set.
+let claudeLimitsLoggedAt = 0;
 const claudeCodeState = () => (process.env.CLAUDE_CONFIG_DIR ? join(process.env.CLAUDE_CONFIG_DIR, '.claude.json') : join(homedir(), '.claude.json'));
 function claudeCodeLimits() {
   // The newest of: Claude Code's own cached usage, and what its status line saved.
@@ -1598,6 +1617,10 @@ handle('ai:usage', async ({ force = false } = {}) => {
   const fromCode = claudeCodeLimits();
   const webHasLimits = Boolean(web?.session || web?.weekly);
   const claudeLimits = webHasLimits ? web : fromCode ? { ...fromCode, webError: web?.error || null, loggedOut: web?.loggedOut, missing: web?.missing } : web;
+  if (!claudeLimits?.session && !claudeLimits?.weekly && Date.now() - claudeLimitsLoggedAt > 30 * 60000) {
+    claudeLimitsLoggedAt = Date.now();
+    log('claude limits', 'no source has them', `claude.ai: ${web?.missing ? 'no service' : web?.error || 'nothing'}`, `${claudeCodeState()}: ${existsSync(claudeCodeState()) ? 'no usage entry' : 'missing'}`);
+  }
   return { codex, claude: { ...(local.claude || {}), web: claudeLimits, statusLine: claudeStatusLineState(), serviceId: claudeService?.id || null }, error: local.error || null, at: Date.now() };
 });
 

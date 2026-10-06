@@ -36,6 +36,11 @@ test('Teams can be added and keeps Microsoft sign-in inside Nuvia', { timeout: 9
     await teams.eval(`window.open('https://login.microsoftonline.com/'); return true`);
     login = await app.page(target => target.type === 'page' && target.url.startsWith('https://login.microsoftonline.com/'));
     assert.match(await login.waitFor('document.body.innerText'), /Next/);
+    // Sign-in pages get no passkeys, so Microsoft asks for the password Nuvia can fill.
+    assert.deepEqual(await login.eval(`
+      const refused = await navigator.credentials.get({ publicKey: { challenge: new Uint8Array(8) } }).then(() => null, error => error.name);
+      return { passkeyApi: typeof window.PublicKeyCredential, refused };`), { passkeyApi: 'undefined', refused: 'NotAllowedError' });
+    assert.notEqual(await teams.eval('return typeof window.PublicKeyCredential'), 'undefined', 'the app pages themselves are untouched');
 
     // Teams joins the unified inbox: its chats are read, opened and replied to.
     await ui.eval(`document.querySelector('[data-route="messages"]').click(); return true`);

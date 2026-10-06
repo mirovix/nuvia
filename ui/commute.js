@@ -1,4 +1,4 @@
-import { api, state, $, h, icon, fill, on, savePrefs, segmented, clock, empty } from './core.js';
+import { api, state, $, h, icon, fill, on, emit, savePrefs, segmented, clock, empty } from './core.js';
 import { defineWidget } from './home.js';
 import { describeTraffic } from '../lib/traffic.js';
 
@@ -127,7 +127,10 @@ function renderResult(ctx) {
   fill(summary,
     h('div.big', String(route.minutes), h('small', 'min')),
     h('div.sub', `${route.kilometers.toLocaleString('en-GB')} km · arrive at ${clock(route.arrival)}`,
-      traffic ? h(`span.traffic.${route.traffic.level}`, icon(route.traffic.level === 'clear' ? 'check' : 'triangle-alert'), traffic) : null));
+      traffic ? h(`span.traffic.${route.traffic.level}`, icon(route.traffic.level === 'clear' ? 'check' : 'triangle-alert'), traffic) : null,
+      // A drive without live traffic: say so, and where to turn it on.
+      !traffic && route.trafficMissing ? h('button.link.traffic-missing', { type: 'button', title: route.trafficMissing === 'no-key' ? 'Live traffic needs a free TomTom key' : route.trafficMissing, on: { click: () => emit('open-settings', 'integrations') } },
+        icon('triangle-alert'), route.trafficMissing === 'no-key' ? 'no live traffic · add a free key' : 'live traffic unavailable · check the key') : null));
   fill(steps,
     h('div.route-ends', h('div', h('b', 'A'), h('span', { title: route.origin.full || route.origin.label }, route.origin.label)), h('div', h('b', 'B'), h('span', { title: route.destination.full || route.destination.label }, route.destination.label))),
     route.steps.map(step => h('div.step', h('span.turn', icon(stepIcon(step))), h('span', step.text), h('small', step.type === 'arrive' ? '' : step.distance))));

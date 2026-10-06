@@ -98,11 +98,11 @@ Turn it off in **Settings → General → Update automatically**; check by hand 
 - **Messages**: WhatsApp, Telegram, Mattermost and Microsoft Teams in a single timeline that reads like one chat, with quick replies. Teams keeps its Microsoft sign-in inside Nuvia and can share your screen.
 - **Calendar**: one agenda from Google Calendar, Outlook and any iCal link.
 - **Music**: a built-in player on top of Spotify Web, with artwork, artist, album, progress, volume, library and search. It never opens the Spotify app.
-- **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) sign back in by themselves after you log in once; you get a notification when a second factor is needed.
+- **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) sign back in by themselves after you log in once; you get a notification when a second factor is needed. Sign-in pages get no passkeys, so Microsoft and Google ask for your password instead of face, fingerprint or PIN. Chromium's tracker cleanup, which deleted single-sign-on sessions about once a day, is off.
 - **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed. Map tiles are cached on disk and fetched as OpenStreetMap's tile policy asks, with backup map servers if one refuses.
-- **Live traffic** (optional): add a free TomTom key in Settings → Integrations and the commute shows the real delay and arrival time instead of free-flow. Without a key Nuvia says nothing about traffic rather than guessing.
+- **Live traffic** (optional): add a free TomTom key in Settings → Integrations and the commute shows the real delay and arrival time instead of free-flow. Without a key the card says *no live traffic · add a free key*, which opens that setting; it never guesses.
 - **Claude & Codex**: how much of the 5-hour and weekly limits you've used, when they reset, and how many tokens you've spent.
-- **Notifications** panel, **weather**, Italian **trains** (ViaggiaTreno, with delay alerts) and **Notion** shortcuts.
+- **Notifications** that go away once read (clicked, the service opened, or seen in the panel), and only for the cards you show on the overview. **Weather** with feels-like, humidity, wind, rain, UV, sunrise and sunset, the next 12 hours and 5 days. Italian **trains** (ViaggiaTreno, with delay alerts) and **Notion** shortcuts. The music card closes after two minutes of pause.
 - Chrome Web Store **extensions**, enabled per service.
 - Dark, light or system theme, seven accent colours, backgrounds and a compact sidebar.
 - **Time zone**: pick the one you are in (Settings → General); the clock, calendar, mail and message times follow it at once.

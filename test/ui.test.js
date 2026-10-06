@@ -232,9 +232,12 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
 
     await t.test('music: built-in player with artwork, artist and controls', async () => {
       const spotify = await app.page(target => target.url.startsWith('https://open.spotify.com'));
-      await ui.waitFor(`/Clouds/.test(document.querySelector('.widget[data-widget="music"] .track')?.innerText) && /Artist One/.test(document.querySelector('.widget[data-widget="music"] .track').innerText)`, { timeout: 30000 });
+      // Paused: the track without its artist. Playing: with the artist.
+      await ui.waitFor(`/Clouds/.test(document.querySelector('.widget[data-widget="music"] .track')?.innerText) && window.__nuviaDebug.state.music.paused === true`, { timeout: 30000 });
+      assert.doesNotMatch(await text('.widget[data-widget="music"] .track'), /Artist One/);
       await ui.eval(`document.querySelector('.widget[data-widget="music"] .play').click()`);
       await ui.waitFor(`window.__nuviaDebug.state.music.paused === false`);
+      await ui.waitFor(`/Artist One/.test(document.querySelector('.widget[data-widget="music"] .track').innerText)`);
       await ui.eval(`document.querySelector('.widget[data-widget="music"] [title="Next"]').click()`);
       await ui.waitFor(`/Clear Skies/.test(document.querySelector('.widget[data-widget="music"] .track').innerText)`);
       assert.equal((await debug()).attached, false, 'Spotify must not open on screen');
@@ -364,6 +367,34 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       await ui.waitFor(`/From the widget/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
       await ui.eval(`document.querySelector('.widget[data-widget="notifications"] .delete-notification').click()`);
       await ui.waitFor(`!/From the widget/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
+    });
+
+    await t.test('notifications: they go away once read', async () => {
+      const titles = async () => (await ui.eval('return window.nuvia.listNotifications()')).map(item => item.title);
+      // Seen in the panel: gone when the panel closes.
+      await ui.eval(`await window.nuvia.addNotification({ title: 'Train late', body: '+5 min', type: 'train' })`);
+      await click('#open-notifications');
+      await ui.waitFor(`document.querySelector('.notif-panel[open] .notif')`);
+      await ui.eval(`document.querySelector('.notif-panel').close()`);
+      await ui.waitFor(`document.querySelector('#open-notifications .dot-badge').hidden`);
+      assert.deepEqual(await titles(), []);
+      // About a service: gone when that service is opened.
+      await ui.eval(`await window.nuvia.addNotification({ title: 'Gmail Test', body: '2 new emails', type: 'mail', serviceId: 'gmail' }); await window.nuvia.addNotification({ title: 'Other', body: 'stays', type: 'info' })`);
+      await ui.waitFor(`/2 new emails/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
+      await ui.eval(`document.querySelector('.service[data-id="gmail"]').click()`);
+      await ui.waitFor(`document.querySelector('#page-title').textContent === 'Gmail Test'`);
+      await ui.waitFor(`!/2 new emails/.test(JSON.stringify(window.__nuviaDebug.state.notifications))`);
+      assert.deepEqual(await titles(), ['Other'], 'only the notification about Gmail went away');
+      await click('[data-route="home"]');
+      // Clicked: opens what it is about and goes away.
+      await ui.eval(`await window.nuvia.addNotification({ title: 'WhatsApp', body: '1 new message', type: 'message', serviceId: 'wa' })`);
+      await ui.waitFor(`/1 new message/.test(document.querySelector('.widget[data-widget="notifications"]').innerText)`);
+      await ui.eval(`[...document.querySelectorAll('.widget[data-widget="notifications"] .notif')].find(n => n.innerText.includes('1 new message')).click()`);
+      await ui.waitFor(`document.querySelector('#page-title').textContent === 'WhatsApp'`);
+      await ui.waitFor(`!JSON.stringify(window.__nuviaDebug.state.notifications).includes('1 new message')`);
+      assert.deepEqual(await titles(), ['Other']);
+      await ui.eval(`await window.nuvia.removeNotification(null)`);
+      await click('[data-route="home"]');
     });
 
     await t.test('widgets: options, sizes, hide, customize and drag', async () => {

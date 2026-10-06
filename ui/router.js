@@ -50,6 +50,8 @@ export async function go(route) {
 export function enterService(id) {
   if (!state.services.some(item => item.id === id)) return false;
   state.route = 'service'; state.serviceId = id;
+  // Opening a service reads what its notifications were about.
+  api.dismissNotifications({ serviceId: id }).catch(() => {});
   $$('.page').forEach(page => { page.hidden = true; });
   $('#view-host').hidden = false;
   markNav(); renderTopbar();

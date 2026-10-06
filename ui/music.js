@@ -100,7 +100,8 @@ defineWidget({
     ctx.setMeta(music.paused ? 'paused' : 'playing');
     if (!music.title) return fill(ctx.body, empty('disc-3', 'Nothing playing', 'Pick a playlist from the player.', h('button.btn.sm', { on: { click: () => emit('go', 'music') } }, icon('library'), 'Library')));
     fill(ctx.body, h('div.music-widget',
-      h('div.player', cover(music), h('div.track', h('strong', music.title), h('span', music.artist), music.album ? h('span.muted', music.album) : null)),
+      // The artist only while it plays: a paused track shows just what it is.
+      h('div.player', cover(music), h('div.track', h('strong', music.title), !music.paused && music.artist ? h('span.artist', music.artist) : null, music.album ? h('span.muted', music.album) : null)),
       progress(music), transport(music)));
   }
 });

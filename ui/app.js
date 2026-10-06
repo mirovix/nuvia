@@ -29,6 +29,8 @@ function trackUnread() {
     if (watchUnread && previous !== undefined && current > previous) {
       api.addNotification({ title: service.name, body: service.group === 'mail' ? `${current - previous} ${current - previous === 1 ? 'new email' : 'new emails'}` : `${current - previous} ${current - previous === 1 ? 'new message' : 'new messages'}`, type: service.group, serviceId: service.id });
     }
+    // Everything read (here or in the service): its "new email/message" notifications go.
+    if (previous > 0 && current === 0) api.dismissNotifications({ serviceId: service.id, types: ['mail', 'message'] });
     unreadBaseline.set(service.id, current);
   }
 }

@@ -610,17 +610,41 @@ async function installMarketplaceExtension(id) {
 // ---------------------------------------------------------------------------
 // Notifications
 
+// The desktop pop-ups still on screen, so they go away with the notification.
+const nativeNotifications = new Map();
 function addNotification(item) {
   const notifications = readJson(paths.notifications(), []);
   const entry = { id: crypto.randomUUID(), time: new Date().toISOString(), read: false, ...item };
   writeJson(paths.notifications(), [entry, ...notifications].slice(0, 150));
   if (!TEST && Notification.isSupported() && preferences().systemNotifications !== false) {
     const native = new Notification({ title: entry.title || 'Nuvia', body: entry.body || '', silent: true });
-    native.on('click', () => { mainWindow?.show(); mainWindow?.focus(); if (entry.serviceId) notifyRenderer('open-service', entry.serviceId); });
+    native.on('click', () => {
+      mainWindow?.show(); mainWindow?.focus();
+      if (entry.serviceId) notifyRenderer('open-service', entry.serviceId);
+      dismissNotifications({ ids: [entry.id] });
+    });
+    native.on('close', () => nativeNotifications.delete(entry.id));
+    nativeNotifications.set(entry.id, native);
     native.show();
   }
   notifyRenderer('notifications:changed');
   return entry;
+}
+
+/**
+ * Removes the notifications that have been read: by id, or every one about a
+ * service (optionally only some types, e.g. new mail once the inbox is read).
+ */
+function dismissNotifications({ ids, serviceId, types } = {}) {
+  const current = readJson(paths.notifications(), []);
+  const wanted = new Set(ids || []);
+  const gone = item => wanted.has(item.id) || (serviceId && item.serviceId === serviceId && (!types || types.includes(item.type)));
+  const next = current.filter(item => !gone(item));
+  if (next.length === current.length) return current;
+  for (const item of current) if (gone(item)) { try { nativeNotifications.get(item.id)?.close(); } catch {} nativeNotifications.delete(item.id); }
+  writeJson(paths.notifications(), next);
+  notifyRenderer('notifications:changed');
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -1453,9 +1477,11 @@ handle('notifications:add', item => addNotification(item));
 handle('notifications:remove', id => {
   const current = readJson(paths.notifications(), []);
   const next = id ? current.filter(item => item.id !== id) : [];
+  for (const item of current) if (!next.includes(item)) { try { nativeNotifications.get(item.id)?.close(); } catch {} nativeNotifications.delete(item.id); }
   writeJson(paths.notifications(), next); return next;
 });
 handle('notifications:read-all', () => { const next = readJson(paths.notifications(), []).map(item => ({ ...item, read: true })); writeJson(paths.notifications(), next); return next; });
+handle('notifications:dismiss', query => dismissNotifications(query || {}));
 
 let usageWorker; let usageRequest = 0; const usageWaiting = new Map();
 function scanUsage() {

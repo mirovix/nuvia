@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('nuvia', {
   addNotification: invoke('notifications:add'),
   removeNotification: invoke('notifications:remove'),
   readAllNotifications: invoke('notifications:read-all'),
+  dismissNotifications: invoke('notifications:dismiss'),
   onNotificationsChanged: listen('notifications:changed'),
 
   aiUsage: invoke('ai:usage'),

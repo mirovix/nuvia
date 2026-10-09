@@ -1,0 +1,119 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Servizio di Accesso Web - idp9-shib5</title></head>
+<body>
+<!-- The University of Padova's Shibboleth login page (shibidp.cca.unipd.it), markup
+     and scripts as served in October 2026, trimmed to the form. What matters:
+     - the username field the user sees is j_username_js, and the page itself
+       pre-fills it with the hint "nome.cognome" (initOverLabels);
+     - the domain is a radio group that defaults to @unipd.it, and login_via_js
+       copies "<username><domain>" (or a full address as typed) into the hidden
+       j_username only when the form is submitted.
+     Instead of posting, the fixture checks the credentials like the IdP would. -->
+<p id="error"></p>
+<form class="form-horizontal" id="user-login-form" action="/idp/profile/SAML2/Redirect/SSO?execution=e1s2" method="post" onsubmit="return login_via_js()">
+  <span id="div_visible_before_js">
+    <div class="form-group">
+      <input class="form-control" id="j_username" name="j_username" type="text" value="" tabindex="1">
+      <label>Esempio Username</label>
+      <div style="text-align:right;padding-right:30px;"><i>nome.cognome@unipd.it</i></div>
+    </div>
+  </span>
+  <span id="div_hidden_before_js" style="display:none;visibility:hidden;">
+    <div class="form-group">
+      <label for="j_username_js">Nome utente</label>
+      <input class="form-control" id="j_username_js" name="j_username_js" type="text" value="" tabindex="2">
+      <label for="password">Password</label>
+      <input class="form-control" id="password" name="j_password" type="password" value="" tabindex="3">
+    </div>
+  </span>
+  <span id="div_hidden_before_js2" style="display:none;visibility:hidden;">
+    <div class="radio" style="text-align: left;"><label><input type="radio" name="dominio" id="radio1" value="@unipd.it" checked="checked" title="Dominio" tabindex="10">@unipd.it</label></div>
+    <div class="radio" style="text-align: left;"><label><input type="radio" name="dominio" id="radio2" value="@studenti.unipd.it" tabindex="11">     @studenti.unipd.it</label></div>
+    <div class="radio" style="text-align: left;"><label><input type="radio" name="dominio" id="radio3" value="@ext.unipd.it" tabindex="11">     @ext.unipd.it</label></div>
+  </span>
+  <div class="row">
+    <button class="btn btn-default" type="submit" name="_eventId_proceed" id="login_button_js" onclick="javascript:login_via_js()" style="display:none;visibility:hidden;" tabindex="6">Accedi</button>
+    <button class="btn btn-default" type="submit" name="_eventId_proceed" id="Login" tabindex="4">Accedi</button>
+  </div>
+</form>
+<script type="text/javascript">
+        function initOverLabels () {
+                 if (!document.getElementById) return;
+                 var user = document.getElementById('j_username_js');
+                 // user.className = 'overlabel';
+                 user.value = 'nome.cognome';
+                 user.onfocus = function(){
+                 // this.className = 'inputsearch';
+                 this.value = '';
+                 };
+        };
+
+        function login_via_js(){
+
+                 var userjs = document.getElementById('j_username_js');
+                 var user = document.getElementById('j_username');
+                 var radio1 = document.getElementById('radio1');
+                 var radio2 = document.getElementById('radio2');
+                 var jpassword = document.getElementById('j_password');
+                 var formlogin = document.getElementById('user-login-form');
+                 var radioselected = "";
+                 if ( radio1.checked == true ) { radioselected = radio1.value; }
+                    else if (radio2.checked == true)  { radioselected = radio2.value; }
+                    else{ radioselected = radio3.value; }
+                 var StrBlank = userjs.value.substring(0, 1);
+                 while (StrBlank == " ")
+                 {
+                  userjs.value = userjs.value.substring(1, userjs.value.length);
+                  StrBlank = userjs.value.substring(0, 1);
+                 }
+
+                 StrBlank = userjs.value.substring(userjs.value.length - 1, userjs.value.length);
+
+                 while (StrBlank == " ")
+                 {
+                  userjs.value = userjs.value.substring(0, userjs.value.length-1);
+                  StrBlank = userjs.value.substring(userjs.value.length-1, userjs.value.length);
+                 }
+
+                 if (userjs.value.indexOf("@studenti.unipd.it")>-1 || userjs.value.indexOf("@unipd.it")>-1 || userjs.value.indexOf("@uetest.asit.unipd.it")>-1 || userjs.value.indexOf("@ext.unipd.it")>-1)
+                 user.value= userjs.value;
+                 else user.value = userjs.value + radioselected;
+
+                 return true;
+        };
+
+                function enable_js(){
+                 var old_login = document.getElementById('div_visible_before_js');
+                 var new_login = document.getElementById('div_hidden_before_js');
+                 var new_login2 = document.getElementById('div_hidden_before_js2');
+                 var old_button = document.getElementById('Login');
+                 var new_button = document.getElementById('login_button_js');
+                 old_login.style.visibility = 'hidden';
+                 old_login.style.display = 'none';
+                 new_login.style.visibility = 'visible';
+                 new_login.style.display = 'inline';
+                 new_login2.style.visibility = 'visible';
+                 new_login2.style.display = 'inline';
+                 old_button.style.visibility = 'hidden';
+                 old_button.style.display = 'none';
+                 new_button.style.visibility = 'visible';
+                 new_button.style.display = 'inline';
+
+        };
+
+        window.onload = function(){
+        enable_js();
+        setTimeout(initOverLabels, 50);
+        };
+</script>
+<script>
+  // Fixture only: the IdP's credential check. Runs after the page's own onsubmit.
+  if (/err=1/.test(location.search)) document.getElementById('error').textContent = 'Le credenziali inserite non sono corrette';
+  document.getElementById('user-login-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const user = document.getElementById('j_username').value;
+    const password = document.getElementById('password').value;
+    if (user === 'mario.rossi@studenti.unipd.it' && password === 'Segreta-123') location.href = 'https://workspace.nuvia.test/?ticket=ok&as=' + encodeURIComponent(user);
+    else location.href = '/idp/profile/SAML2/Redirect/SSO?execution=e1s3&err=1&as=' + encodeURIComponent(user);
+  });
+</script>
+</body></html>

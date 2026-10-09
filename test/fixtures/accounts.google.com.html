@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Sign in - Google Accounts</title></head>
+<body>
+<!-- Google's identifier step. A Workspace account with SAML SSO has no password
+     at Google: after the email, Google redirects to the university's IdP. -->
+<h1>Sign in</h1>
+<form id="f" onsubmit="return false">
+  <input type="email" id="identifierId" name="identifier" autocomplete="username">
+  <p id="err"></p>
+  <button type="button" id="next"><span>Next</span></button>
+</form>
+<script>
+  document.getElementById('next').addEventListener('click', () => {
+    const email = document.getElementById('identifierId').value.trim().toLowerCase();
+    if (/^[a-z0-9.]+@((studenti|ext)\.)?unipd\.it$/.test(email)) location.href = 'https://shibidp.cca.unipd.it/idp/profile/SAML2/Redirect/SSO?execution=e1s2';
+    else document.getElementById('err').textContent = "Couldn't find your Google Account";
+  });
+</script>
+</body></html>

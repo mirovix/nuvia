@@ -16,7 +16,7 @@ import { readInfo, defaultRules } from './lib/extensions.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
-import { fillSignIn, isSignInUrl } from './lib/autologin.js';
+import { fillSignIn, fullUsername, isSignInUrl } from './lib/autologin.js';
 import { createTileSource, parseTileUrl } from './lib/tiles.js';
 import { createTrafficSource, trafficLevel } from './lib/traffic.js';
 import { CHECK_EVERY_MS, checkRelease, installKind, installPaths, isNewer, parseSums } from './lib/updater.js';
@@ -388,12 +388,13 @@ const hostOf = url => { try { return new URL(url).hostname; } catch { return '';
 async function watchSignIn(service, contents) {
   if (contents.isDestroyed()) return;
   const url = contents.getURL();
-  const state = signInState.get(service.id) || { attempts: [], inFlow: false, noticeAt: 0, mfaAt: 0, signedIn: false };
+  const state = signInState.get(service.id) || { attempts: [], passwords: [], inFlow: false, noticeAt: 0, mfaAt: 0, failedAt: 0, signedIn: false };
   signInState.set(service.id, state);
   if (!isSignInUrl(url)) {
     if (state.inFlow) log('sign-in', service.name, state.auto ? 'signed back in automatically' : 'left the sign-in page', hostOf(url));
     if (state.inFlow && state.auto) addNotification({ title: service.name, body: 'Signed back in automatically.', type: 'success', serviceId: service.id });
     Object.assign(state, { inFlow: false, auto: false, signedIn: true, inFlowLogged: false });
+    state.passwords.splice(0);
     return;
   }
   state.inFlow = true;
@@ -409,12 +410,31 @@ async function watchSignIn(service, contents) {
   }
   state.attempts = state.attempts.filter(at => Date.now() - at < 5 * 60000);
   if (state.attempts.length >= 14) return; // never loop on a failing sign-in
+  // A password that was not accepted twice is wrong (changed, expired): stop
+  // before the university locks the account, and say so.
+  if (state.passwords.length >= 2) {
+    if (Date.now() - state.failedAt > 2 * 3600000) {
+      state.failedAt = Date.now();
+      log('sign-in', service.name, hostOf(url), 'saved password refused, stopped');
+      addNotification({ title: service.name, body: `Nuvia could not sign in automatically: the saved password for ${credentials.username} was not accepted. Open the service and sign in once by hand to update it.`, type: 'warning', serviceId: service.id });
+    }
+    return;
+  }
+  // One fill at a time: the page finishing to load and the follow-up check can
+  // both fire, and two fills would submit the password twice.
+  if (state.busy) { state.again = true; return; }
   state.attempts.push(Date.now());
-  await sleep(900);
-  const action = await run(contents, `(${fillSignIn.toString()})(${JSON.stringify(credentials.username)}, ${JSON.stringify(credentials.password)})`, 5000, 'none');
+  state.busy = true;
+  let action;
+  try {
+    await sleep(900);
+    action = await run(contents, `(${fillSignIn.toString()})(${JSON.stringify(credentials.username)}, ${JSON.stringify(credentials.password)})`, 5000, 'none');
+  } finally { state.busy = false; }
+  if (state.again) { state.again = false; if (action === 'none') setTimeout(() => { if (!contents.isDestroyed()) watchSignIn(service, contents); }, 600); }
   // Which site and which step, never what was typed: enough to see where a sign-in stops.
   log('sign-in', service.name, hostOf(url), action);
   if (action !== 'none') state.auto = true;
+  if (action === 'password') state.passwords.push(Date.now());
   // Multi-step pages (email, then password) change without a reload: look again.
   if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(() => { if (!contents.isDestroyed() && isSignInUrl(contents.getURL())) watchSignIn(service, contents); }, 2500);
   if (action === 'mfa' && Date.now() - state.mfaAt > 30 * 60000) {
@@ -905,16 +925,18 @@ ipcMain.on('nuvia:signin-capture', (event, data) => {
   const key = [...views.entries()].find(([, view]) => view.webContents === event.sender)?.[0];
   const service = key && serviceById(key.split('#')[0]);
   if (!service) return;
-  const username = String(data?.username || '').trim().slice(0, 320);
-  const password = String(data?.password || '').slice(0, 1024);
   const pending = pendingUsernames.get(service.id);
+  const recent = pending && Date.now() - pending.at < 10 * 60000 ? pending.username : '';
+  const username = fullUsername(String(data?.username || '').slice(0, 320), { domain: String(data?.domain || ''), pending: recent });
+  const password = String(data?.password || '').slice(0, 1024);
   if (username) pendingUsernames.set(service.id, { username, at: Date.now() });
   if (!password) return;
-  const user = username || (pending && Date.now() - pending.at < 10 * 60000 ? pending.username : '');
+  const user = username || recent;
   if (!user) return;
   const saved = signInCredentials(service.id);
   if (saved?.username === user && saved?.password === password) return;
   writeFileSync(signInFile(service.id), safeStorage.encryptString(JSON.stringify({ username: user, password })), { mode: 0o600 });
+  signInState.get(service.id)?.passwords.splice(0);
   addNotification({ title: service.name, body: `Sign-in saved for ${user}: Nuvia will reconnect automatically when the session expires. You can remove it in Edit service.`, type: 'success', serviceId: service.id });
 });
 
@@ -923,6 +945,7 @@ handle('services:signin-set', (id, { username, password } = {}) => {
   if (!safeStorage.isEncryptionAvailable()) throw new Error('The system keychain is unavailable, so the password cannot be stored safely');
   if (!serviceById(id) || !String(username || '').trim() || !password) throw new Error('Enter username and password');
   writeFileSync(signInFile(id), safeStorage.encryptString(JSON.stringify({ username: String(username).trim(), password: String(password) })), { mode: 0o600 });
+  signInState.get(id)?.passwords.splice(0);
   const contents = views.get(id)?.webContents;
   if (contents && isSignInUrl(contents.getURL())) watchSignIn(serviceById(id), contents);
   return { saved: true, username: String(username).trim() };

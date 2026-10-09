@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Gmail UniPD</title></head>
+<body>
+<!-- Gmail of a Google Workspace with SAML single sign-on (@studenti.unipd.it):
+     when Google's session ends it sends you to accounts.google.com, which hands
+     over to the university's Shibboleth IdP. -->
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get('ticket') === 'ok') {
+    localStorage.setItem('session', '1');
+    localStorage.setItem('idpUser', params.get('as') || '');
+    history.replaceState(null, '', '/');
+  }
+  if (localStorage.getItem('session') !== '1') location.href = 'https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fworkspace.nuvia.test%2F&hd=studenti.unipd.it&flowName=GlifWebSignIn';
+  else document.body.innerHTML = '<h1>Inbox</h1><p id="who">' + localStorage.getItem('idpUser') + '</p>';
+</script>
+</body></html>

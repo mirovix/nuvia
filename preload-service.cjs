@@ -31,10 +31,12 @@ if (SIGN_IN_HOSTS.test(location.hostname)) {
     const password = [...document.querySelectorAll('input[type="password"]')].find(input => input.value);
     const username = [...document.querySelectorAll(USER_FIELDS)].find(input => input.value && input.type !== 'password');
     if (!password && !username) return;
-    const key = `${username?.value || ''}\u0000${password?.value || ''}`;
+    // The domain picked next to a username typed without it (UniPD: @unipd.it / @studenti.unipd.it).
+    const domain = [...document.querySelectorAll('input[type="radio"]:checked')].map(input => input.value).find(value => /^@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) || '';
+    const key = `${username?.value || ''}\u0000${password?.value || ''}\u0000${domain}`;
     if (key === last) return;
     last = key;
-    ipcRenderer.send('nuvia:signin-capture', { username: username?.value || '', password: password?.value || '' });
+    ipcRenderer.send('nuvia:signin-capture', { username: username?.value || '', password: password?.value || '', domain });
   };
   // Capture phase: runs before the page's own handlers can navigate away.
   document.addEventListener('submit', capture, true);

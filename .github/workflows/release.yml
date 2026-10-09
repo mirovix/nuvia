@@ -1,10 +1,16 @@
 name: Release
 
-# Push a tag like v0.6.0 to build every platform and publish a GitHub Release.
+# Push a tag like v0.6.0 to build every platform and publish a GitHub Release,
+# or run it by hand with a tag name: the release then creates that tag on the
+# commit it was run on.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create and publish (e.g. v0.6.14); empty = build only'
+        required: false
 
 permissions:
   contents: write
@@ -52,7 +58,7 @@ jobs:
 
   release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || startsWith(inputs.tag, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -62,6 +68,8 @@ jobs:
       - run: ls -la packages && (cd packages && sha256sum * > SHA256SUMS.txt)
       - uses: softprops/action-gh-release@v2
         with:
-          name: Nuvia ${{ github.ref_name }}
+          name: Nuvia ${{ inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: packages/*

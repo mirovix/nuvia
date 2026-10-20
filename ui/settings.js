@@ -146,6 +146,13 @@ export async function loadExtensions() {
 
 export function renderExtensionToolbar() {
   const bar = $('#extension-toolbar');
+  // Gmail or Outlook open: Claude reads the email, asks what to say, drafts the reply.
+  const reply = $('#reply-claude');
+  reply.hidden = !(state.route === 'service' && state.services.find(item => item.id === state.serviceId)?.group === 'mail');
+  reply.onclick = async () => {
+    const result = await api.replyWithClaude(state.serviceId);
+    if (!result?.opened) toast(result?.reason || 'Claude could not open the email');
+  };
   if (state.route !== 'service') return fill(bar);
   fill(bar, state.extensions.filter(extension => extension.rules?.[state.serviceId] !== false).map(extension => h('button.ext-pill', {
     title: extension.popup ? `${extension.name} — open` : extension.name,

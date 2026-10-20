@@ -1,4 +1,4 @@
-import { api, state, $, $$, on, emit, hydrateIcons, icon } from './core.js';
+import { api, state, $, $$, on, emit, hydrateIcons, icon, toast } from './core.js';
 import { go, openService } from './router.js';
 import { initServices, loadServices, applyLiveState, openEditService, removeService } from './services.js';
 import { initHome, renderHero } from './home.js';
@@ -66,6 +66,7 @@ async function init() {
   initAi();
   initNotifications();
   wireWindow();
+  api.onToast(message => toast(message));
   $$('#nav .nav-item').forEach(item => item.addEventListener('click', () => go(item.dataset.route)));
   on('go', route => go(route));
   on('open-service', id => openService(id));

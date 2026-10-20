@@ -1,4 +1,4 @@
-import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components, safeStorage, protocol } from 'electron';
+import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components, safeStorage, protocol, clipboard, nativeTheme } from 'electron';
 import { join, extname, resolve, sep, dirname, delimiter, basename } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync, accessSync, realpathSync, constants as fsConstants } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -14,6 +14,7 @@ import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-status
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
 import { readInfo, defaultRules, extensionHosts, hostAllowed } from './lib/extensions.js';
 import { prepareExtension } from './lib/extension-shim.js';
+import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, startChat } from './lib/claude-chat.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
@@ -329,10 +330,12 @@ function wireContents(contents, service, key) {
         addNotification({ title: service.name, body: 'Streak needs you to finish signing in: the window is open.', type: 'warning', serviceId: service.id });
       }, 15000);
     }
+    popup.on('context-menu', (_, params) => contextMenu(popup, params, null));
     popup.on('did-stop-loading', () => watchSignIn(service, popup, stateKey));
     popup.on('did-navigate-in-page', (_, url, isMainFrame) => { if (isMainFrame !== false && isSignInUrl(url)) setTimeout(() => watchSignIn(service, popup, stateKey), 600); });
   });
   followGoogleSignIn(contents);
+  contents.on('context-menu', (_, params) => contextMenu(contents, params, service));
   contents.setWindowOpenHandler(({ url }) => {
     if (!/^https?:|^about:blank/i.test(url)) return { action: 'deny' };
     let host = ''; try { host = new URL(url).hostname; } catch {}
@@ -858,6 +861,7 @@ function createWindow() {
   mainWindow.on('maximize', () => notifyRenderer('window:state', { maximized: true }));
   mainWindow.on('unmaximize', () => notifyRenderer('window:state', { maximized: false }));
   mainWindow.webContents.session.setPermissionRequestHandler((_, permission, callback) => callback(permission === 'geolocation'));
+  mainWindow.webContents.on('context-menu', (_, params) => contextMenu(mainWindow.webContents, params, null));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { if (/^https:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
 }
 
@@ -1824,8 +1828,189 @@ handle('ai:usage', async ({ force = false } = {}) => {
   return { codex, claude: { ...(local.claude || {}), web: claudeLimits, statusLine: claudeStatusLineState(), serviceId: claudeService?.id || null }, error: local.error || null, at: Date.now() };
 });
 
+// ---------------------------------------------------------------------------
+// Right click: what a browser offers (copy, paste, links, images), plus
+// "Ask Claude" on a selection and "Reply with Claude" in Gmail and Outlook.
+
+let lastMenu = null; // tests: the last menu built, clicked through debug:menu-click
+const shortText = (text, max = 28) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line; };
+function contextMenu(contents, params, service, { ask = true } = {}) {
+  const { editFlags = {}, selectionText = '', linkURL = '', srcURL = '', mediaType, isEditable, misspelledWord, dictionarySuggestions = [] } = params;
+  const selection = selectionText.trim();
+  const items = [];
+  const section = list => { const real = list.filter(Boolean); if (!real.length) return; if (items.length) items.push({ type: 'separator' }); items.push(...real); };
+  if (isEditable && misspelledWord) section([
+    ...dictionarySuggestions.slice(0, 5).map(word => ({ label: word, click: () => contents.replaceMisspelling(word) })),
+    dictionarySuggestions.length ? null : { label: 'No suggestions', enabled: false },
+    { label: 'Add to dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(misspelledWord) }
+  ]);
+  if (selection && ask) section([{ label: `Ask Claude about “${shortText(selection)}”`, click: () => openAskChat(contents, selection) }]);
+  if (service && serviceGroup(service) === 'mail' && !isEditable) section([{ label: 'Reply with Claude', click: () => openMailChat(service.id).then(result => { if (!result.opened) notifyRenderer('toast', result.reason); }) }]);
+  if (/^https?:/i.test(linkURL)) section([
+    { label: 'Open link in browser', click: () => openOutside(linkURL) },
+    { label: 'Copy link address', click: () => clipboard.writeText(linkURL) }
+  ]);
+  else if (/^mailto:/i.test(linkURL)) section([{ label: 'Copy email address', click: () => clipboard.writeText(decodeURIComponent(linkURL.slice(7).split('?')[0])) }]);
+  if (mediaType === 'image' && srcURL) section([
+    { label: 'Copy image', click: () => contents.copyImageAt(params.x, params.y) },
+    /^https?:/i.test(srcURL) ? { label: 'Copy image address', click: () => clipboard.writeText(srcURL) } : null
+  ]);
+  if (isEditable) section([
+    { label: 'Undo', enabled: editFlags.canUndo, click: () => contents.undo() },
+    { label: 'Redo', enabled: editFlags.canRedo, click: () => contents.redo() },
+    { type: 'separator' },
+    { label: 'Cut', enabled: editFlags.canCut, click: () => contents.cut() },
+    { label: 'Copy', enabled: editFlags.canCopy, click: () => contents.copy() },
+    { label: 'Paste', enabled: editFlags.canPaste, click: () => contents.paste() },
+    { label: 'Paste as plain text', enabled: editFlags.canPaste, click: () => contents.pasteAndMatchStyle() },
+    { label: 'Select all', enabled: editFlags.canSelectAll, click: () => contents.selectAll() }
+  ]);
+  else if (selection) section([{ label: 'Copy', click: () => contents.copy() }]);
+  if (service && !selection && !linkURL && !isEditable && mediaType !== 'image') section([
+    { label: 'Back', enabled: contents.navigationHistory.canGoBack(), click: () => contents.navigationHistory.goBack() },
+    { label: 'Forward', enabled: contents.navigationHistory.canGoForward(), click: () => contents.navigationHistory.goForward() },
+    { label: 'Reload', click: () => contents.reload() },
+    { type: 'separator' },
+    { label: 'Open page in browser', click: () => openOutside(contents.getURL()) },
+    { label: 'Copy page address', click: () => clipboard.writeText(contents.getURL()) }
+  ]);
+  if (!items.length) return;
+  const menu = Menu.buildFromTemplate(items);
+  if (TEST) { lastMenu = menu; log('context-menu', items.filter(item => item.label).map(item => item.label).join(' | ')); return; }
+  menu.popup({ window: BrowserWindow.fromWebContents(contents) || mainWindow });
+}
+
+// Claude chats (lib/claude-chat.js), each in its own small window (chat.html).
+const chats = new Map(); // chat page webContents id → chat
+const LANGUAGES = { it: 'Italian', en: 'English', fr: 'French', de: 'German', es: 'Spanish', pt: 'Portuguese', nl: 'Dutch', pl: 'Polish', ro: 'Romanian', sr: 'Serbian', hr: 'Croatian' };
+// The language Claude talks in: the setting, else the first non-English one the
+// system names (an English desktop with Italian dates and units talks Italian).
+function chatLanguage() {
+  const chosen = preferences().chatLanguage;
+  if (chosen && chosen !== 'auto') return chosen;
+  const codes = [app.getSystemLocale?.(), process.env.LC_ALL, process.env.LC_MESSAGES, process.env.LANGUAGE, process.env.LANG, process.env.LC_TIME, ...app.getPreferredSystemLanguages(), app.getLocale()]
+    .filter(Boolean).map(code => String(code).slice(0, 2).toLowerCase());
+  const code = codes.find(item => item !== 'en' && item !== 'c' && LANGUAGES[item]) || 'en';
+  return LANGUAGES[code];
+}
+function chatTheme() {
+  const { theme = 'dark', accent = 'blue' } = preferences();
+  return { theme: theme === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : theme, accent };
+}
+const clamp = (value, low, high) => Math.max(low, Math.min(value, high));
+function openChat(options) {
+  // One question window and one reply window per mailbox: a new one replaces the old.
+  for (const chat of chats.values()) if (chat.mode === options.mode && chat.serviceId === options.serviceId && !chat.window.isDestroyed()) chat.window.close();
+  const cursor = screen.getCursorScreenPoint();
+  const area = screen.getDisplayNearestPoint(cursor).workArea;
+  let bounds;
+  if (options.mode === 'ask') {
+    const width = 420; const height = 400;
+    const below = cursor.y + 14 + height <= area.y + area.height;
+    bounds = { width, height, x: clamp(cursor.x - 40, area.x, area.x + area.width - width), y: clamp(below ? cursor.y + 14 : cursor.y - height - 10, area.y, area.y + area.height - height) };
+  } else {
+    const main = mainWindow.getBounds();
+    const width = 470; const height = clamp(main.height - 90, 420, 760);
+    bounds = { width, height, x: clamp(main.x + main.width - width - 20, area.x, area.x + area.width - width), y: clamp(main.y + 70, area.y, area.y + area.height - height) };
+  }
+  const { theme } = chatTheme();
+  const window = new BrowserWindow({ ...bounds, show: false, frame: false, resizable: true, minWidth: 320, minHeight: 260, parent: mainWindow, skipTaskbar: true, title: options.title, backgroundColor: theme === 'light' ? '#fffefa' : '#16171a', webPreferences: { preload: join(import.meta.dirname, 'preload-chat.cjs'), contextIsolation: true, sandbox: true } });
+  const id = window.webContents.id;
+  const chat = { ...options, window, conversation: null };
+  chats.set(id, chat);
+  window.on('closed', () => { chat.conversation?.stop(); chats.delete(id); });
+  // A question closes when you click elsewhere, like a menu; a reply stays while you read the email.
+  if (options.mode === 'ask') {
+    let focused = false;
+    window.on('focus', () => { focused = true; });
+    window.on('blur', () => { if (focused && !window.isDestroyed()) window.close(); });
+  }
+  window.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) openOutside(url); return { action: 'deny' }; });
+  window.webContents.on('will-navigate', event => event.preventDefault());
+  window.webContents.on('context-menu', (_, params) => contextMenu(window.webContents, params, null, { ask: false }));
+  window.once('ready-to-show', () => window.show());
+  window.loadFile('chat.html');
+  return window;
+}
+function openAskChat(contents, selection) {
+  const host = hostOf(contents.getURL());
+  openChat({ mode: 'ask', serviceId: null, title: 'Ask Claude', sub: host ? `From ${host}` : 'From Nuvia', quote: selection.slice(0, 400),
+    system: askSystem({ language: chatLanguage() }), prompt: askPrompt({ text: selection, title: contents.getTitle(), host }) });
+}
+async function openMailChat(serviceId) {
+  const service = serviceById(serviceId);
+  const contents = views.get(serviceId)?.webContents;
+  if (!service || serviceGroup(service) !== 'mail') return { opened: false, reason: 'Reply with Claude works in Gmail and Outlook.' };
+  if (!contents || contents.isDestroyed()) return { opened: false, reason: `Open ${service.name} and an email first.` };
+  const mail = await run(contents, script(pageScripts.mailThread, serviceKind(service)), 6000, null);
+  if (!mail?.ok) return { opened: false, reason: mail?.reason || 'Nuvia could not read the email: open it and try again.' };
+  const last = mail.messages.at(-1);
+  openChat({ mode: 'mail', serviceId, title: 'Reply with Claude', sub: mail.subject || service.name,
+    quote: last?.from ? `${last.from}${mail.messages.length > 1 ? ` · ${mail.messages.length} messages` : ''}${mail.subject ? ` — ${mail.subject}` : ''}` : mail.subject,
+    system: mailSystem({ language: chatLanguage(), name: preferences().name }), prompt: mailPrompt(mail) });
+  return { opened: true };
+}
+handle('chat:mail-reply', serviceId => openMailChat(serviceId || activeKey?.split('#')[0] || lastServiceId));
+
+const chatFor = event => chats.get(event.sender.id);
+// What Claude Code says when it fails, in words that say what to do.
+function chatError(message) {
+  if (/not installed|ENOENT/i.test(message)) return 'Claude Code is not installed on this computer. Install it from claude.com/claude-code and sign in once by running `claude` in a terminal.';
+  if (/log ?in|logged|authenticat|credential|401|api key/i.test(message)) return 'Claude Code is not signed in: run `claude` in a terminal once and sign in, then try again.';
+  if (/rate.?limit|usage limit|limit reached|429/i.test(message)) return `Your Claude plan limit is reached for now. ${message}`;
+  return `Claude could not answer: ${message}`;
+}
+ipcMain.handle('chat:start', event => {
+  const chat = chatFor(event);
+  if (!chat) return { error: 'This chat has ended.' };
+  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: chat.mode === 'mail', ...chatTheme() };
+  if (chat.conversation) return meta;
+  const command = process.env.NUVIA_CLAUDE_BIN || findClaude({ home: homedir() });
+  if (!command) return { ...meta, error: chatError('not installed'), fallback: true };
+  const folder = fileInProfile('claude-chat');
+  mkdirSync(folder, { recursive: true });
+  const send = value => { if (!chat.window.isDestroyed()) chat.window.webContents.send('chat:event', value); };
+  chat.conversation = startChat({ command, system: chat.system, model: preferences().chatModel || 'sonnet', cwd: folder, onEvent: value => {
+    if (value.type === 'error') { log('claude chat', chat.mode, value.message); value = { ...value, message: chatError(value.message), fallback: true }; }
+    send(value);
+  } });
+  chat.conversation.send(chat.prompt);
+  return meta;
+});
+ipcMain.handle('chat:send', (event, text) => { chatFor(event)?.conversation?.send(String(text || '').slice(0, 20000)); });
+ipcMain.handle('chat:copy', (_, text) => { clipboard.writeText(String(text || '')); return true; });
+ipcMain.handle('chat:close', event => { chatFor(event)?.window.close(); });
+ipcMain.handle('chat:insert', async (event, text) => {
+  const chat = chatFor(event);
+  const service = chat && serviceById(chat.serviceId);
+  const contents = chat && views.get(chat.serviceId)?.webContents;
+  if (!service || !contents || contents.isDestroyed()) return { ok: false, reason: 'The mailbox is closed: use Copy.' };
+  const result = await run(contents, script(pageScripts.insertMailReply, serviceKind(service), String(text || '')), 12000, null);
+  return result?.ok ? result : { ok: false, reason: result?.reason || 'The reply box could not be filled: use Copy and paste it.' };
+});
+// Without Claude Code: the question goes to Claude in Nuvia, ready to paste.
+ipcMain.handle('chat:open-claude', event => {
+  const chat = chatFor(event);
+  clipboard.writeText(`${chat?.system || ''}\n\n${chat?.prompt || ''}`.trim());
+  const claudeService = services().find(item => serviceKind(item) === 'claude');
+  if (claudeService) { notifyRenderer('open-service', claudeService.id); mainWindow.focus(); } else openOutside('https://claude.ai/new');
+  notifyRenderer('toast', 'The question is copied: paste it into Claude.');
+  chat?.window.close();
+});
+
 if (TEST) {
   handle('debug:state', () => ({ activeKey, overlayDepth, attached: Boolean(views.get(activeKey) && attached(views.get(activeKey))), views: [...views.keys()], hostBounds, uiExtensions: session.defaultSession.extensions.getAllExtensions().length }));
+  handle('debug:menu', () => (lastMenu ? lastMenu.items.filter(item => item.label).map(item => ({ label: item.label, enabled: item.enabled })) : null));
+  handle('debug:menu-click', label => { const item = lastMenu?.items.find(entry => entry.label === label); if (!item) return false; item.click(); return true; });
+  handle('debug:menu-clear', () => { lastMenu = null; });
+  // A right click through Chromium's own input path, as the mouse does it.
+  handle('debug:right-click', ({ key, x, y }) => {
+    const contents = views.get(key)?.webContents; if (!contents) return false;
+    contents.sendInputEvent({ type: 'mouseMove', x, y });
+    contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'right', clickCount: 1 });
+    contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'right', clickCount: 1 });
+    return true;
+  });
   handle('debug:crash-guard', () => readJson(paths.guard(), {}));
   handle('debug:cookie-roundtrip', async id => {
     const jar = session.fromPartition(partitionFor(id)).cookies;

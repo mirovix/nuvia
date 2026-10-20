@@ -101,6 +101,9 @@ Turn it off in **Settings → General → Update automatically**; check by hand 
 - **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) sign back in by themselves after you log in once, including single-sign-on pages with a domain picker such as the University of Padova's (@unipd.it, @studenti.unipd.it); you get a notification when a second factor is needed, and a password that is refused is tried at most twice. Sign-in pages get no passkeys, so Microsoft and Google ask for your password instead of face, fingerprint or PIN. Chromium's tracker cleanup, which deleted single-sign-on sessions about once a day, is off.
 - **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed. Map tiles are cached on disk and fetched as OpenStreetMap's tile policy asks, with backup map servers if one refuses.
 - **Live traffic** (optional): add a free TomTom key in Settings → Integrations and the commute shows the real delay and arrival time instead of free-flow. Without a key the card says *no live traffic · add a free key*, which opens that setting; it never guesses.
+- **Right click** works on every page: copy, paste, links, images, spelling, back and reload.
+- **Ask Claude**: select some text anywhere, right-click, *Ask Claude about "…"*. A small window next to the mouse says what it is, without leaving the page; you can ask a follow-up, and a click elsewhere closes it.
+- **Reply with Claude**: with an email open in Gmail or Outlook, click *Reply with Claude* in the top bar (or right-click the email). Claude reads the thread, says what the sender wants, asks what you want to answer, then drafts the reply; *Insert into reply* puts it into the email's reply box, or *Copy* it. Ask for changes (*Shorter*, *More formal*, or anything you type) until it is right.
 - **Claude & Codex**: how much of the 5-hour and weekly limits you've used, when they reset, and how many tokens you've spent.
 - **Notifications** that go away once read (clicked, the service opened, or seen in the panel), and only for the cards you show on the overview. **Weather** with feels-like, humidity, wind, rain, UV, sunrise and sunset, the next 12 hours and 5 days. Italian **trains** (ViaggiaTreno, with delay alerts) and **Notion** shortcuts. The music card closes after two minutes of pause.
 - Chrome Web Store **extensions**, enabled per service.
@@ -121,6 +124,7 @@ Turn it off in **Settings → General → Update automatically**; check by hand 
 - **Claude & Codex** reads the local session logs of Claude Code (`~/.claude`) and Codex (`~/.codex`). No credentials are read.
   - *Codex* limits are asked live from the Codex CLI (`codex app-server`), one set of bars per account, and shown like Codex shows them: what is **left** in each window (5 hours, week, or month on the free plan). Codex keeps one login per folder: sign in another account once with `CODEX_HOME=~/.codex-work codex login` and every `~/.codex-*` folder shows up on its own.
   - *Claude* limits come from your claude.ai usage page if you add Claude as a service, otherwise from the copy Claude Code keeps of them in `~/.claude.json` (refreshed while it runs, in the terminal or in VS Code; only that entry is read). For the terminal, **Show limits from Claude Code** can also add a status line that prints `5h 23% · 7d 41%`; it never replaces a status line you already have and keeps a backup of `settings.json`.
+- **Ask Claude** and **Reply with Claude** use the Claude Code CLI installed on your computer (`claude`, signed in to your account), started with no tools, no MCP servers and none of your Claude Code settings or hooks: it can only answer. The selected text, or the open email thread, goes to Claude only when you ask; conversations are not saved. Claude talks in your system's language (Italian on an English desktop with Italian dates), and replies in the email's own language. Without Claude Code, the question is copied for you to paste into Claude.
 - Extensions are never loaded into Nuvia's own interface, only into the services where you enable them.
 
 ## Extensions
@@ -161,6 +165,7 @@ npm start
 ```bash
 npm test                  # unit: addresses, routing, iCal, parsers, usage, extensions
 npm run test:ui           # end-to-end on every page and button, with simulated services (Linux + xvfb)
+npm run test:chat         # right click, Ask Claude, Reply with Claude (a fake Claude Code)
 npm run test:integration  # against the real services: network, Chrome Web Store, Spotify DRM, WhatsApp
 ```
 

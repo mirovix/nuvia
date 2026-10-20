@@ -198,10 +198,13 @@ function followGoogleSignIn(contents) {
 }
 
 // Tests only: answer https requests of known hosts with local fixture pages.
+let fixtureFailures = 0;
 function serveFixtures(serviceSession) {
   const root = process.env.NUVIA_FIXTURES;
   serviceSession.protocol.handle('https', request => {
     const url = new URL(request.url);
+    // A network that is not up yet: the first two loads of this host fail.
+    if (url.hostname === 'flaky.nuvia.test' && fixtureFailures++ < 2) return Response.error();
     const json = join(root, `${url.hostname}${url.pathname.replace(/\//g, '_')}.json`);
     if (existsSync(json)) return new Response(readFileSync(json), { headers: { 'content-type': 'application/json' } });
     const html = join(root, `${url.hostname}.html`);
@@ -288,14 +291,43 @@ async function createServiceView(service, key = service.id, url = service.url) {
   wireContents(view.webContents, service, key);
   if (key === service.id) trackState(view, service);
   view.webContents.once('did-finish-load', () => releaseGuard(service.id));
+  retryFailedLoads(view, service, url);
   view.webContents.loadURL(url).catch(error => log('load', service.name, error.message));
   views.set(key, view);
   return view;
 }
 
+// A page that failed to load (no network yet at startup, Wi-Fi dropping) used to
+// stay blank until reloaded by hand. Nuvia now tries again by itself: after 2 s,
+// 5 s, 15 s, 30 s, then every minute, and at once when the service is opened.
+const RETRY_DELAYS = [2000, 5000, 15000, 30000, 60000];
+const failedLoads = new Map(); // webContents id → retry now
+function retryFailedLoads(view, service, firstUrl) {
+  const contents = view.webContents;
+  let attempt = 0; let timer = null;
+  contents.on('did-fail-load', (_, code, description, failedUrl, isMainFrame) => {
+    // -3 is a navigation the page or the user cancelled, not a failure.
+    if (!isMainFrame || code === -3 || contents.isDestroyed()) return;
+    const target = failedUrl || contents.getURL() || firstUrl;
+    const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
+    attempt += 1;
+    log('load', service.name, `${description} (${code}), trying again in ${delay / 1000} s`);
+    clearTimeout(timer);
+    const retry = () => { clearTimeout(timer); failedLoads.delete(contents.id); if (!contents.isDestroyed()) contents.loadURL(target).catch(() => {}); };
+    failedLoads.set(contents.id, retry);
+    timer = setTimeout(retry, delay);
+  });
+  // Not did-finish-load: Chromium also "finishes" loading its own error page.
+  contents.on('did-navigate', (_, url, httpResponseCode) => {
+    if (httpResponseCode > 0) { attempt = 0; clearTimeout(timer); failedLoads.delete(contents.id); }
+  });
+  contents.once('destroyed', () => { clearTimeout(timer); failedLoads.delete(contents.id); });
+}
+
 async function activate(service, { key = service.id, url } = {}) {
   const previous = views.get(activeKey);
   const view = await createServiceView(service, key, url || service.url);
+  failedLoads.get(view.webContents.id)?.(); // opened while its page had failed: try again now
   if (url && views.get(key) === view && view.webContents.getURL() && view.webContents.getURL() !== url) await view.webContents.loadURL(url).catch(() => {});
   if (previous && previous !== view) detach(previous);
   activeKey = key;

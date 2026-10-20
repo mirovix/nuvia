@@ -14,7 +14,7 @@ import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-status
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
 import { readInfo, defaultRules, extensionHosts, hostAllowed } from './lib/extensions.js';
 import { prepareExtension } from './lib/extension-shim.js';
-import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, startChat } from './lib/claude-chat.js';
+import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, startChat, startCodexChat } from './lib/claude-chat.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
@@ -212,6 +212,8 @@ function serveFixtures(serviceSession) {
     const url = new URL(request.url);
     // A network that is not up yet: the first two loads of this host fail.
     if (url.hostname === 'flaky.nuvia.test' && fixtureFailures++ < 2) return Response.error();
+    // A frame that never finishes loading (an extension's, say).
+    if (url.hostname === 'hang.nuvia.test') return new Promise(() => {});
     const json = join(root, `${url.hostname}${url.pathname.replace(/\//g, '_')}.json`);
     if (existsSync(json)) return new Response(readFileSync(json), { headers: { 'content-type': 'application/json' } });
     const html = join(root, `${url.hostname}.html`);
@@ -383,6 +385,20 @@ function wireContents(contents, service, key) {
   });
 }
 
+// Whether the page itself is loading. Electron's isLoading() and even
+// isLoadingMainFrame() stay true while any frame in it loads, so it is followed
+// here: a new page starts loading, and it is done when it has loaded (its load
+// event), failed or stopped.
+const mainLoading = new WeakMap();
+const pageLoading = contents => mainLoading.get(contents) ?? contents.isLoading();
+function trackPageLoading(contents, changed = () => {}) {
+  const set = value => { if (mainLoading.get(contents) === value) return; mainLoading.set(contents, value); changed(); };
+  contents.on('did-start-navigation', details => { if (details.isMainFrame && !details.isSameDocument) set(true); });
+  contents.on('did-finish-load', () => set(false));
+  contents.on('did-fail-load', (_, code, description, url, isMainFrame) => { if (isMainFrame && code !== -3) set(false); });
+  contents.on('did-stop-loading', () => set(false));
+}
+
 function trackState(view, service) {
   const contents = view.webContents;
   const update = extra => {
@@ -391,7 +407,9 @@ function trackState(view, service) {
     serviceState.set(service.id, {
       ...previous, id: service.id, name: service.name, kind: serviceKind(service),
       url: contents.isDestroyed() ? previous.url : (contents.getURL() || service.url), title,
-      loading: !contents.isDestroyed() && contents.isLoading(),
+      // The page itself, not every frame in it: an extension's hidden frame that
+      // never finishes (Streak in Gmail) kept the bar running on a loaded page.
+      loading: !contents.isDestroyed() && pageLoading(contents),
       canGoBack: !contents.isDestroyed() && contents.navigationHistory.canGoBack(),
       canGoForward: !contents.isDestroyed() && contents.navigationHistory.canGoForward(),
       unread: previous.domUnread ?? unreadFromTitle(title), ...extra
@@ -400,6 +418,7 @@ function trackState(view, service) {
   };
   contents.on('page-title-updated', () => update());
   contents.on('did-start-loading', () => update({ crashed: false }));
+  trackPageLoading(contents, update);
   // Every page load (a reload too) checks once whether an extension asks to sign in again.
   let reconnectStarted = false; let reconnectRun = 0;
   contents.on('did-navigate', () => { reconnectStarted = false; reconnectRun++; });
@@ -525,8 +544,11 @@ async function run(contents, code, ms = 8000, fallback = null) {
 }
 
 function waitForLoad(contents, ms = 12000) {
-  if (!contents.isLoading()) return Promise.resolve();
-  return withTimeout(new Promise(resolveWait => contents.once('did-stop-loading', resolveWait)), ms);
+  // The page itself: a frame that never finishes must not hold every read for 12 s.
+  if (!pageLoading(contents)) return Promise.resolve();
+  // Whichever comes first: the page's load (a frame may never finish), or
+  // loading stopping (a form answered without a new page fires no load).
+  return withTimeout(new Promise(resolveWait => { contents.once('did-finish-load', resolveWait); contents.once('did-stop-loading', resolveWait); }), ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -1886,6 +1908,9 @@ handle('ai:usage', async ({ force = false } = {}) => {
 // "Ask Claude" on a selection and "Reply with Claude" in Gmail and Outlook.
 
 let lastMenu = null; // tests: the last menu built, clicked through debug:menu-click
+// Who answers "Ask …" and "Reply with …": Claude (Claude Code) or ChatGPT (Codex), in Settings → General.
+const chatProvider = () => (preferences().chatProvider === 'codex' ? 'codex' : 'claude');
+const providerName = () => (chatProvider() === 'codex' ? 'ChatGPT' : 'Claude');
 const shortText = (text, max = 28) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line; };
 function contextMenu(contents, params, service, { ask = true } = {}) {
   const { editFlags = {}, selectionText = '', linkURL = '', srcURL = '', mediaType, isEditable, misspelledWord, dictionarySuggestions = [] } = params;
@@ -1897,8 +1922,8 @@ function contextMenu(contents, params, service, { ask = true } = {}) {
     dictionarySuggestions.length ? null : { label: 'No suggestions', enabled: false },
     { label: 'Add to dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(misspelledWord) }
   ]);
-  if (selection && ask) section([{ label: `Ask Claude about “${shortText(selection)}”`, click: () => openAskChat(contents, selection) }]);
-  if (service && serviceGroup(service) === 'mail' && !isEditable) section([{ label: 'Reply with Claude', click: () => openMailChat(service.id).then(result => { if (!result.opened) notifyRenderer('toast', result.reason); }) }]);
+  if (selection && ask) section([{ label: `Ask ${providerName()} about “${shortText(selection)}”`, click: () => openAskChat(contents, selection) }]);
+  if (service && serviceGroup(service) === 'mail' && !isEditable) section([{ label: `Reply with ${providerName()}`, click: () => openMailChat(service.id).then(result => { if (!result.opened) notifyRenderer('toast', result.reason); }) }]);
   if (/^https?:/i.test(linkURL)) section([
     { label: 'Open link in browser', click: () => openOutside(linkURL) },
     { label: 'Copy link address', click: () => clipboard.writeText(linkURL) }
@@ -1969,7 +1994,7 @@ function openChat(options) {
   const { theme } = chatTheme();
   const window = new BrowserWindow({ ...bounds, show: false, frame: false, resizable: true, minWidth: 320, minHeight: 260, parent: mainWindow, skipTaskbar: true, title: options.title, backgroundColor: theme === 'light' ? '#fffefa' : '#16171a', webPreferences: { preload: join(import.meta.dirname, 'preload-chat.cjs'), contextIsolation: true, sandbox: true } });
   const id = window.webContents.id;
-  const chat = { ...options, window, conversation: null };
+  const chat = { ...options, provider: chatProvider(), window, conversation: null };
   chats.set(id, chat);
   window.on('closed', () => { chat.conversation?.stop(); chats.delete(id); });
   // A question closes when you click elsewhere, like a menu; a reply stays while you read the email.
@@ -1987,18 +2012,18 @@ function openChat(options) {
 }
 function openAskChat(contents, selection) {
   const host = hostOf(contents.getURL());
-  openChat({ mode: 'ask', serviceId: null, title: 'Ask Claude', sub: host ? `From ${host}` : 'From Nuvia', quote: selection.slice(0, 400),
+  openChat({ mode: 'ask', serviceId: null, title: `Ask ${providerName()}`, sub: host ? `From ${host}` : 'From Nuvia', quote: selection.slice(0, 400),
     system: askSystem({ language: chatLanguage() }), prompt: askPrompt({ text: selection, title: contents.getTitle(), host }) });
 }
 async function openMailChat(serviceId) {
   const service = serviceById(serviceId);
   const contents = views.get(serviceId)?.webContents;
-  if (!service || serviceGroup(service) !== 'mail') return { opened: false, reason: 'Reply with Claude works in Gmail and Outlook.' };
+  if (!service || serviceGroup(service) !== 'mail') return { opened: false, reason: `Reply with ${providerName()} works in Gmail and Outlook.` };
   if (!contents || contents.isDestroyed()) return { opened: false, reason: `Open ${service.name} and an email first.` };
   const mail = await run(contents, script(pageScripts.mailThread, serviceKind(service)), 6000, null);
   if (!mail?.ok) return { opened: false, reason: mail?.reason || 'Nuvia could not read the email: open it and try again.' };
   const last = mail.messages.at(-1);
-  openChat({ mode: 'mail', serviceId, title: 'Reply with Claude', sub: mail.subject || service.name,
+  openChat({ mode: 'mail', serviceId, title: `Reply with ${providerName()}`, sub: mail.subject || service.name,
     quote: last?.from ? `${last.from}${mail.messages.length > 1 ? ` · ${mail.messages.length} messages` : ''}${mail.subject ? ` — ${mail.subject}` : ''}` : mail.subject,
     system: mailSystem({ language: chatLanguage(), name: preferences().name }), prompt: mailPrompt(mail) });
   return { opened: true };
@@ -2006,8 +2031,14 @@ async function openMailChat(serviceId) {
 handle('chat:mail-reply', serviceId => openMailChat(serviceId || activeKey?.split('#')[0] || lastServiceId));
 
 const chatFor = event => chats.get(event.sender.id);
-// What Claude Code says when it fails, in words that say what to do.
-function chatError(message) {
+// What Claude Code or Codex says when it fails, in words that say what to do.
+function chatError(message, provider = 'claude') {
+  if (provider === 'codex') {
+    if (/not installed|ENOENT/i.test(message)) return 'ChatGPT answers through the Codex CLI, which is not installed on this computer. Install it (npm install -g @openai/codex) and sign in once with `codex login`, or choose Claude in Settings → General.';
+    if (/not logged|log ?in|authenticat|401|unauthorized/i.test(message)) return 'Codex is not signed in: run `codex login` in a terminal once, then try again.';
+    if (/usage limit|rate limit|quota|try again at/i.test(message)) return `Every ChatGPT account signed in to Codex has reached its limit. ${message}`;
+    return `ChatGPT could not answer: ${message}`;
+  }
   if (/not installed|ENOENT/i.test(message)) return 'Claude Code is not installed on this computer. Install it from claude.com/claude-code and sign in once by running `claude` in a terminal.';
   if (/log ?in|logged|authenticat|credential|401|api key/i.test(message)) return 'Claude Code is not signed in: run `claude` in a terminal once and sign in, then try again.';
   if (/rate.?limit|usage limit|limit reached|429/i.test(message)) return `Your Claude plan limit is reached for now. ${message}`;
@@ -2016,17 +2047,27 @@ function chatError(message) {
 ipcMain.handle('chat:start', event => {
   const chat = chatFor(event);
   if (!chat) return { error: 'This chat has ended.' };
-  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: chat.mode === 'mail', ...chatTheme() };
+  const provider = chat.provider;
+  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: chat.mode === 'mail', provider: provider === 'codex' ? 'ChatGPT' : 'Claude', ...chatTheme() };
   if (chat.conversation) return meta;
-  const command = process.env.NUVIA_CLAUDE_BIN || findClaude({ home: homedir() });
-  if (!command) return { ...meta, error: chatError('not installed'), fallback: true };
   const folder = fileInProfile('claude-chat');
   mkdirSync(folder, { recursive: true });
   const send = value => { if (!chat.window.isDestroyed()) chat.window.webContents.send('chat:event', value); };
-  chat.conversation = startChat({ command, system: chat.system, model: preferences().chatModel || 'sonnet', cwd: folder, onEvent: value => {
-    if (value.type === 'error') { log('claude chat', chat.mode, value.message); value = { ...value, message: chatError(value.message), fallback: true }; }
+  const onEvent = value => {
+    if (value.type === 'error') { log(`${provider} chat`, chat.mode, value.message); value = { ...value, message: chatError(value.message, provider), fallback: true }; }
     send(value);
-  } });
+  };
+  if (provider === 'codex') {
+    const command = process.env.NUVIA_CODEX_CHAT_BIN ? { command: process.env.NUVIA_CODEX_CHAT_BIN, args: [] } : findCodex({ home: homedir() });
+    if (!command) return { ...meta, error: chatError('not installed', 'codex'), fallback: true };
+    const extra = String(process.env.NUVIA_CODEX_HOMES || '').split(delimiter).filter(Boolean); // tests
+    const homes = codexHomes({ home: TEST ? undefined : homedir(), primary: CODEX_HOME, extra });
+    chat.conversation = startCodexChat({ command, homes, system: chat.system, cwd: folder, onEvent });
+  } else {
+    const command = process.env.NUVIA_CLAUDE_BIN || findClaude({ home: homedir() });
+    if (!command) return { ...meta, error: chatError('not installed'), fallback: true };
+    chat.conversation = startChat({ command, system: chat.system, model: preferences().chatModel || 'sonnet', cwd: folder, onEvent });
+  }
   chat.conversation.send(chat.prompt);
   return meta;
 });
@@ -2038,16 +2079,20 @@ ipcMain.handle('chat:insert', async (event, text) => {
   const service = chat && serviceById(chat.serviceId);
   const contents = chat && views.get(chat.serviceId)?.webContents;
   if (!service || !contents || contents.isDestroyed()) return { ok: false, reason: 'The mailbox is closed: use Copy.' };
+  // Typing needs the mailbox focused, not the chat window.
+  mainWindow.focus(); contents.focus();
   const result = await run(contents, script(pageScripts.insertMailReply, serviceKind(service), String(text || '')), 12000, null);
+  if (!result?.ok) log('reply with claude', service.name, 'insert failed', result?.reason || 'the page did not answer');
   return result?.ok ? result : { ok: false, reason: result?.reason || 'The reply box could not be filled: use Copy and paste it.' };
 });
-// Without Claude Code: the question goes to Claude in Nuvia, ready to paste.
+// Without the CLI: the question goes to Claude (or ChatGPT) in Nuvia, ready to paste.
 ipcMain.handle('chat:open-claude', event => {
   const chat = chatFor(event);
+  const codex = chat?.provider === 'codex';
   clipboard.writeText(`${chat?.system || ''}\n\n${chat?.prompt || ''}`.trim());
-  const claudeService = services().find(item => serviceKind(item) === 'claude');
-  if (claudeService) { notifyRenderer('open-service', claudeService.id); mainWindow.focus(); } else openOutside('https://claude.ai/new');
-  notifyRenderer('toast', 'The question is copied: paste it into Claude.');
+  const target = services().find(item => serviceKind(item) === (codex ? 'codex' : 'claude'));
+  if (target) { notifyRenderer('open-service', target.id); mainWindow.focus(); } else openOutside(codex ? 'https://chatgpt.com/' : 'https://claude.ai/new');
+  notifyRenderer('toast', `The question is copied: paste it into ${codex ? 'ChatGPT' : 'Claude'}.`);
   chat?.window.close();
 });
 

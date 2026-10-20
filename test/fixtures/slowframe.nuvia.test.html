@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Slow frame</title></head>
+<body>
+<!-- Loaded; then a frame is added that never finishes, as an extension does in Gmail. -->
+<h1>Loaded</h1>
+<script>addEventListener('load', () => setTimeout(() => { const frame = document.createElement('iframe'); frame.src = 'https://hang.nuvia.test/never'; document.body.append(frame); setTimeout(() => { document.title = 'Slow frame (1)'; }, 800); }, 500));</script>
+</body></html>

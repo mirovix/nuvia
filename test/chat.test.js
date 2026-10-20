@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, writeProfile, project } from './helpers.js';
 
@@ -96,5 +96,53 @@ test('right click menu, Ask Claude on a selection, Reply with Claude in Gmail', 
     throw new Error(`${error.message}\n--- Nuvia log ---\n${nuviaLog().slice(-2000)}\n--- Electron log ---\n${app.output().slice(-2500)}`);
   } finally {
     ask?.close(); reply?.close(); gmail?.close(); ui?.close(); await app.close();
+  }
+});
+
+// ChatGPT chosen in Settings: the same tools, answered by the Codex CLI
+// (test/fixtures/fake-codex-exec.mjs), on the first account not at its limit.
+test('with ChatGPT chosen, Ask and Reply are answered by Codex', { timeout: 120000 }, async () => {
+  const app = await launch({
+    prepare: profile => {
+      const fixtures = join(profile, 'fixtures');
+      cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
+      process.env.NUVIA_FIXTURES = fixtures;
+      mkdirSync(join(profile, 'home', '.codex'), { recursive: true });
+      writeFileSync(join(profile, 'home', '.codex', 'auth.json'), '{}');
+      mkdirSync(join(profile, 'codex-work'), { recursive: true });
+      writeFileSync(join(profile, 'codex-work', 'auth.json'), '{}');
+      process.env.NUVIA_CODEX_HOMES = join(profile, 'codex-work');
+      writeProfile(profile, { 'services.json': [{ id: 'gmail', name: 'Gmail Test', url: 'https://mail.google.com/mail/u/0/#inbox' }], 'preferences.json': { chatLanguage: 'Italian', chatProvider: 'codex' } });
+    },
+    env: { NUVIA_CODEX_CHAT_BIN: join(project, 'test', 'fixtures', 'fake-codex-exec.mjs'), FAKE_CODEX_LIMITED: '.codex' }
+  });
+  const nuviaLog = () => { try { return readFileSync(join(app.profile, 'nuvia.log'), 'utf8'); } catch { return ''; } };
+  let ui; let gmail; let ask;
+  try {
+    ui = await app.ui();
+    await ui.eval(`document.querySelector('.service[data-id="gmail"]').click(); return true`);
+    gmail = await app.page(target => target.type === 'page' && target.url.startsWith('https://mail.google.com'), 30000);
+    await gmail.waitFor(`document.querySelector('h2.hP')`);
+    assert.equal(await ui.eval(`return document.querySelector('#reply-claude span').textContent`), 'Reply with ChatGPT');
+    await gmail.eval(`const node = document.getElementById('body').firstChild; const start = node.data.indexOf('photosynthesis'); const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + 'photosynthesis'.length); getSelection().removeAllRanges(); getSelection().addRange(range); return true`);
+    const { x, y } = await gmail.eval(`const r = getSelection().getRangeAt(0).getBoundingClientRect(); return { x: Math.round(r.left + 4), y: Math.round(r.top + r.height / 2) }`);
+    let menu = null;
+    for (let attempt = 0; attempt < 3 && !menu; attempt++) {
+      await ui.eval('await window.nuvia.debugMenuClear(); return true');
+      await ui.eval(`return window.nuvia.debugRightClick({ key: 'gmail', x: ${x}, y: ${y} })`);
+      menu = await ui.waitFor('window.nuvia.debugMenu()', { timeout: 3000 }).catch(() => null);
+    }
+    const labels = (menu || []).map(item => item.label);
+    assert.ok(labels.includes('Ask ChatGPT about “photosynthesis”'), labels.join(', '));
+    assert.ok(labels.includes('Reply with ChatGPT'));
+    await ui.eval(`return window.nuvia.debugMenuClick('Ask ChatGPT about “photosynthesis”')`);
+    ask = await app.page(target => target.type === 'page' && target.url.endsWith('chat.html'), 15000);
+    await ask.waitFor(`document.querySelector('.chat-msg.assistant')?.innerText.includes('ChatGPT')`, { timeout: 20000 });
+    assert.equal(await ask.eval(`return document.getElementById('chat-title').textContent`), 'Ask ChatGPT');
+    assert.match(await ask.eval(`return document.querySelector('.chat-msg.assistant').innerText`), /codex-work/, 'the account at its limit handed over');
+  } catch (error) {
+    throw new Error(`${error.message}\n--- Nuvia log ---\n${nuviaLog().slice(-2000)}\n--- Electron log ---\n${app.output().slice(-2000)}`);
+  } finally {
+    ask?.close(); gmail?.close(); ui?.close(); await app.close();
   }
 });

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
-import { prepareExtension, SHIM_FILE, SHIM_SOURCE, WRAPPER_FILE } from '../../lib/extension-shim.js';
+import { prepareExtension, CONTENT_FILE, CONTENT_SOURCE, SHIM_FILE, SHIM_SOURCE, WRAPPER_FILE } from '../../lib/extension-shim.js';
 
 function extension(manifest, files = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'nuvia-ext-'));
@@ -19,7 +19,7 @@ test('the service worker is wrapped so the shim runs first, once', () => {
   const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
   assert.equal(manifest.background.service_worker, WRAPPER_FILE);
   assert.equal(readFileSync(join(dir, WRAPPER_FILE), 'utf8'), `importScripts('${SHIM_FILE}', "bg.js");\n`);
-  assert.deepEqual(manifest.content_scripts[0].js, ['c.js'], 'content scripts are left alone');
+  assert.deepEqual(manifest.content_scripts[0].js, [CONTENT_FILE, 'c.js'], 'content scripts get chrome.extension first');
   assert.equal(readFileSync(join(dir, 'blank.html'), 'utf8'), '<html><head></head></html>', 'extension pages are left alone');
   assert.equal(JSON.parse(readFileSync(join(dir, 'manifest.nuvia-original.json'), 'utf8')).background.service_worker, 'bg.js');
   // A second load changes nothing on disk (Chromium may be reading these files).
@@ -34,7 +34,7 @@ test('module workers are imported, and extensions without a worker are untouched
   prepareExtension(module);
   assert.equal(readFileSync(join(module, WRAPPER_FILE), 'utf8'), `import './${SHIM_FILE}';\nimport './sw.js';\n`);
   const plain = extension({ manifest_version: 3, content_scripts: [] });
-  assert.equal(prepareExtension(plain), false);
+  assert.equal(prepareExtension(plain), false, 'nothing to prepare');
 });
 
 test('the shim fills only what Electron lacks and its APIs work', async () => {
@@ -55,4 +55,28 @@ test('the shim fills only what Electron lacks and its APIs work', async () => {
   assert.equal((await fired).name, 'tick');
   // callbacks work as well as promises
   assert.equal(await new Promise(resolve => chrome.windows.getCurrent(resolve)).then(w => w.id), 1);
+});
+
+// Streak creates the bridge to its storage only when chrome.extension exists,
+// which Electron leaves out of content scripts: its saved sign-in was lost on every reload.
+test('content scripts get chrome.extension first, except those in the page world', () => {
+  const dir = extension({ manifest_version: 3, content_scripts: [
+    { matches: ['https://mail.google.com/*'], js: ['main.js'], world: 'MAIN' },
+    { matches: ['*://*.google.com/*'], js: ['app.js'] },
+    { matches: ['*://*.google.com/*'], css: ['a.css'] }
+  ] });
+  assert.equal(prepareExtension(dir), true);
+  const scripts = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')).content_scripts;
+  assert.deepEqual(scripts.map(entry => entry.js), [['main.js'], [CONTENT_FILE, 'app.js'], undefined]);
+  assert.equal(readFileSync(join(dir, CONTENT_FILE), 'utf8'), CONTENT_SOURCE);
+  // In a content script: added, pointing at runtime.getURL; one that exists is kept.
+  const runtime = { getURL: path => `chrome-extension://abc/${path}`, lastError: undefined };
+  const context = { chrome: { runtime } };
+  vm.runInNewContext(CONTENT_SOURCE, context);
+  assert.equal(context.chrome.extension.getURL('blank.html'), 'chrome-extension://abc/blank.html');
+  assert.equal(context.chrome.extension.inIncognitoContext, false);
+  const own = { getURL: () => 'own' };
+  const existing = { chrome: { runtime, extension: own } };
+  vm.runInNewContext(CONTENT_SOURCE, existing);
+  assert.equal(existing.chrome.extension, own);
 });

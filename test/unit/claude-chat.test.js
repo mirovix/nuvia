@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, startChat } from '../../lib/claude-chat.js';
+import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, startChat, startCodexChat, forgetCodexLimits } from '../../lib/claude-chat.js';
 
 const fake = resolve(import.meta.dirname, '..', 'fixtures', 'fake-claude.mjs');
 
@@ -78,4 +78,44 @@ test('the CLI is found outside PATH, in ~/.local/bin', () => {
   mkdirSync(join(home, '.local', 'bin'), { recursive: true });
   writeFileSync(join(home, '.local', 'bin', 'claude'), '#!/bin/sh\n'); chmodSync(join(home, '.local', 'bin', 'claude'), 0o755);
   assert.equal(findClaude({ env: { PATH: '/nonexistent' }, home }), join(home, '.local', 'bin', 'claude'));
+});
+
+// ChatGPT through the Codex CLI.
+const fakeCodex = resolve(import.meta.dirname, '..', 'fixtures', 'fake-codex-exec.mjs');
+function codexConverse(env, homes, messages) {
+  return new Promise(done => {
+    const events = []; let left = messages.length;
+    const chat = startCodexChat({ command: { command: process.execPath, args: [fakeCodex] }, homes, system: 'Be brief.', cwd: tmpdir(), env: { ...process.env, ...env }, onEvent: event => {
+      events.push(event);
+      if (event.type === 'error' || (event.type === 'done' && --left === 0)) { chat.stop(); done(events); }
+    } });
+    for (const message of messages) chat.send(message);
+  });
+}
+
+test('ChatGPT: each message carries the conversation so far, read-only and saving nothing', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'codex-chat-'));
+  const log = join(tmp, 'log');
+  const events = await codexConverse({ FAKE_CODEX_LOG: log }, [join(tmp, '.codex')], ['first question', 'second question']);
+  assert.deepEqual(events.filter(event => event.type === 'done').map(event => event.text), ['Risposta 1 da .codex', 'Risposta 2 da .codex']);
+  const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.match(calls[0].prompt, /Instructions:\nBe brief\./);
+  assert.match(calls[1].prompt, /\[User\]\nfirst question\n\n\[You\]\nRisposta 1 da \.codex\n\n\[User\]\nsecond question/);
+  for (const flag of ['--ephemeral', '--ignore-user-config', 'read-only']) assert.ok(calls[0].argv.includes(flag), flag);
+});
+
+test('ChatGPT: an account at its usage limit hands over to the next one', async () => {
+  forgetCodexLimits();
+  const tmp = mkdtempSync(join(tmpdir(), 'codex-chat-'));
+  const homes = ['.codex', '.codex-account1', '.codex-account2'].map(name => join(tmp, name));
+  let events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1' }, homes, ['hello', 'again']);
+  assert.deepEqual(events.filter(event => event.type === 'done').map(event => event.text), ['Risposta 1 da .codex-account2', 'Risposta 2 da .codex-account2'], 'and stays on it');
+  // The next conversation starts on the account that answered: no time lost on the limited ones.
+  const log = join(tmp, 'log');
+  events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1', FAKE_CODEX_LOG: log }, homes, ['hello']);
+  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line).home), ['.codex-account2']);
+  forgetCodexLimits();
+  events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1,.codex-account2' }, homes, ['hello']);
+  assert.equal(events.at(-1).type, 'error');
+  assert.match(events.at(-1).message, /usage limit/);
 });

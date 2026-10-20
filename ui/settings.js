@@ -58,6 +58,8 @@ function generalTab() {
     h('label.field', h('span', 'Name'), name, h('small', 'Only used for the greeting on the Overview.')),
     h('label.field', h('span', 'Time zone'), zone, h('small', 'The clock, calendar, mail and message times all follow it. Automatic uses the computer’s time zone.')),
     h('div.field', h('span', 'Weather city'), h('div.inline', city, saveCity)),
+    h('div.field', h('span', 'Ask and Reply with'), segmented([{ value: 'claude', label: 'Claude' }, { value: 'codex', label: 'ChatGPT' }], prefs.chatProvider === 'codex' ? 'codex' : 'claude', value => { prefs.chatProvider = value; flushPrefs(); renderExtensionToolbar(); }),
+      h('small', 'Who answers “Ask … about” on selected text and “Reply with …” on an email. Claude uses Claude Code, ChatGPT uses the Codex CLI, each signed in to your account on this computer.')),
     h('label.check', toggle(prefs.rememberSignIns !== false, value => { prefs.rememberSignIns = value; savePrefs(); }), 'Stay signed in automatically'),
     h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'When you sign in to a service, Nuvia keeps your details encrypted in the system keychain and signs you back in when the session expires (for example a university account). Remove them per service in Edit service.'),
     h('label.check', toggle(prefs.googleSignInCompat !== false, value => { prefs.googleSignInCompat = value; savePrefs(); }), 'Google sign-in compatibility'),
@@ -148,6 +150,7 @@ export function renderExtensionToolbar() {
   const bar = $('#extension-toolbar');
   // Gmail or Outlook open: Claude reads the email, asks what to say, drafts the reply.
   const reply = $('#reply-claude');
+  reply.querySelector('span').textContent = `Reply with ${state.prefs?.chatProvider === 'codex' ? 'ChatGPT' : 'Claude'}`;
   reply.hidden = !(state.route === 'service' && state.services.find(item => item.id === state.serviceId)?.group === 'mail');
   reply.onclick = async () => {
     const result = await api.replyWithClaude(state.serviceId);

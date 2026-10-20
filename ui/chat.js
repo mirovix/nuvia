@@ -107,7 +107,7 @@ chat.onEvent(event => {
   } else if (event.type === 'error') {
     current?.el.remove(); current = null; setBusy(false);
     const note = addMessage('note', event.message);
-    if (event.fallback) note.append(h('button.btn.sm', { type: 'button', on: { click: () => chat.openInClaude() } }, icon('external-link'), 'Open in Claude'));
+    if (event.fallback) note.append(h('button.btn.sm', { type: 'button', on: { click: () => chat.openInClaude() } }, icon('external-link'), `Open in ${meta.provider || 'Claude'}`));
   }
 });
 
@@ -135,7 +135,7 @@ if (meta.mode === 'mail') {
 }
 if (meta.error) {
   const note = addMessage('note', meta.error);
-  if (meta.fallback) note.append(h('button.btn.sm', { type: 'button', on: { click: () => chat.openInClaude() } }, icon('external-link'), 'Open in Claude'));
+  if (meta.fallback) note.append(h('button.btn.sm', { type: 'button', on: { click: () => chat.openInClaude() } }, icon('external-link'), `Open in ${meta.provider || 'Claude'}`));
 } else {
   // The first answer may already be streaming in.
   if (!current) current = { el: addMessage('assistant', ''), text: '' };

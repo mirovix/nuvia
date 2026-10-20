@@ -13,7 +13,7 @@ test('a service page never stays on top of the overview', { timeout: 90000 }, as
       const fixtures = join(profile, 'fixtures');
       cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
       process.env.NUVIA_FIXTURES = fixtures;
-      writeProfile(profile, { 'services.json': [{ id: 'claude', name: 'Claude', url: 'https://claude.ai/new' }, { id: 'gmail', name: 'Gmail', url: 'https://mail.google.com/mail/u/0/#inbox' }], 'preferences.json': { migrations: ['ai-services-1'] } });
+      writeProfile(profile, { 'services.json': [{ id: 'claude', name: 'Claude', url: 'https://claude.ai/new' }, { id: 'gmail', name: 'Gmail', url: 'https://mail.google.com/mail/u/0/#inbox' }, { id: 'slow', name: 'Slow', url: 'https://slowframe.nuvia.test/' }], 'preferences.json': { migrations: ['ai-services-1'] } });
     }
   });
   let ui;
@@ -41,6 +41,11 @@ test('a service page never stays on top of the overview', { timeout: 90000 }, as
     now = await state();
     assert.equal(now.activeKey, 'gmail');
     assert.equal(now.children, 1);
+
+    // A loaded page with a frame that never finishes: not "loading" for ever.
+    await ui.eval(`await window.nuvia.activate('slow'); return true`);
+    const loading = await ui.waitFor(`window.nuvia.serviceState().then(list => { const slow = list.find(item => item.id === 'slow'); return slow && slow.title === 'Slow frame (1)' && slow.loading === false ? 'done' : null; })`, { timeout: 15000 }).catch(error => error.message);
+    assert.equal(loading, 'done', `the bar stops once the page itself has loaded: ${await ui.eval("return window.nuvia.serviceState().then(list => JSON.stringify(list.find(item => item.id === 'slow')))")}`);
   } finally {
     ui?.close(); await app.close();
   }

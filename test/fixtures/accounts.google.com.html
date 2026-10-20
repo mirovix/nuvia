@@ -26,7 +26,13 @@
       document.getElementById('acct').addEventListener('click', () => {
         history.pushState({}, '', '/signin/oauth/id?app=streak');
         document.body.innerHTML = '<h1>Sign in to Streak</h1><p>Google will share your name and email with Streak.</p><button id="cancel">Cancel</button> <button id="go">Continue</button>';
-        document.getElementById('go').addEventListener('click', () => { location.href = 'https://www.streak.com/done'; });
+        // Then the consent page, which shows the account as a chip that switches accounts.
+        document.getElementById('go').addEventListener('click', () => {
+          history.pushState({}, '', '/signin/oauth/v3/consent?app=streak');
+          document.body.innerHTML = '<h1>Streak wants to access your Google Account</h1><div role="button" data-identifier="mario.rossi@studenti.unipd.it" id="chip">mario.rossi@studenti.unipd.it</div><button id="cancel2">Cancel</button> <button id="go2">Continue</button>';
+          document.getElementById('chip').addEventListener('click', () => { location.href = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=streak&switch=1'; });
+          document.getElementById('go2').addEventListener('click', () => { location.href = 'https://www.streak.com/done'; });
+        });
       });
     }, 4000);
   }

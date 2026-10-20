@@ -111,7 +111,7 @@ Turn it off in **Settings → General → Update automatically**; check by hand 
 - **Overview** made of widgets you can show, reorder (drag them by the handle), resize and configure one by one.
 - **Mail**: previews of new Gmail and Outlook messages; one click opens the thread.
 - **Messages**: WhatsApp, Telegram, Mattermost and Microsoft Teams in a single timeline that reads like one chat, with quick replies. Teams keeps its Microsoft sign-in inside Nuvia and can share your screen.
-- **Calendar**: one agenda from Google Calendar, Outlook and any iCal link.
+- **Calendar**: one agenda from Google Calendar, Outlook and any iCal link. The same appointment booked hour by hour (a 9–10 and a 10–11 lecture) shows as one 9–11 event.
 - **Music**: a built-in player on top of Spotify Web, with artwork, artist, album, progress, volume, library and search. It never opens the Spotify app.
 - **Stays signed in**: services that sign you out every few hours (a university Google Workspace, Microsoft 365) sign back in by themselves after you log in once, including single-sign-on pages with a domain picker such as the University of Padova's (@unipd.it, @studenti.unipd.it); you get a notification when a second factor is needed, and a password that is refused is tried at most twice. Sign-in pages get no passkeys, so Microsoft and Google ask for your password instead of face, fingerprint or PIN. Chromium's tracker cleanup, which deleted single-sign-on sessions about once a day, is off.
 - **Commute**: route from A to B on a map, turn-by-turn directions, by car, bike or on foot. Addresses are checked against the city you typed. Map tiles are cached on disk and fetched as OpenStreetMap's tile policy asks, with backup map servers if one refuses.

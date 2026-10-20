@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseICS, expandEvents, zonedTimeToUtc } from '../../lib/ics.js';
+import { parseICS, expandEvents, zonedTimeToUtc, mergeConsecutive } from '../../lib/ics.js';
 
 const ics = `BEGIN:VCALENDAR
 BEGIN:VTIMEZONE
@@ -73,4 +73,23 @@ test('daily and monthly recurrences with UNTIL', () => {
   const list = expandEvents(parseICS(text), new Date('2025-12-31'), new Date('2026-12-31'));
   assert.equal(list.filter(event => event.uid === 'd').length, 4);
   assert.equal(list.filter(event => event.uid === 'm').length, 3);
+});
+
+test('the same appointment in consecutive hours becomes one event', () => {
+  const h = hour => Date.UTC(2026, 9, 20) + hour * 3600000;
+  const event = (title, start, end, extra = {}) => ({ title, start: h(start), end: h(end), sourceId: 'uni', location: 'DEI', allDay: false, ...extra });
+  const merged = mergeConsecutive([
+    event('Robotica', 10, 11), event('Robotica', 9, 10), event('Lunch', 9.5, 10.5, { location: '' }), event('robotica ', 11.25, 12),
+    event('Robotica', 15, 16), event('Robotica', 16, 17, { location: 'Aula B' }), event('Robotica', 16, 17, { sourceId: 'gmail' }),
+    event('Holiday', 0, 24, { allDay: true }), event('Holiday', 24, 48, { allDay: true })
+  ]);
+  assert.deepEqual(merged.map(item => [item.title, (item.start - h(0)) / 3600000, (item.end - h(0)) / 3600000, item.sourceId, item.location]), [
+    ['Holiday', 0, 24, 'uni', 'DEI'],
+    ['Robotica', 9, 12, 'uni', 'DEI'],
+    ['Lunch', 9.5, 10.5, 'uni', ''],
+    ['Robotica', 15, 16, 'uni', 'DEI'],
+    ['Robotica', 16, 17, 'uni', 'Aula B'],
+    ['Robotica', 16, 17, 'gmail', 'DEI'],
+    ['Holiday', 24, 48, 'uni', 'DEI']
+  ]);
 });

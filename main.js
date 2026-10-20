@@ -7,7 +7,7 @@ import { Worker } from 'node:worker_threads';
 import yauzl from 'yauzl';
 import { geocode } from './lib/geocode.js';
 import { routeUrl, summarizeRoute, MODES } from './lib/route.js';
-import { parseICS, expandEvents } from './lib/ics.js';
+import { parseICS, expandEvents, mergeConsecutive } from './lib/ics.js';
 import { parseChatRow, parseMailLines, parseAgendaText, sortFeed, unreadFromTitle, chatTimeToDate } from './lib/feed.js';
 import { normalizeClaudeLimits, codexUsage, claudeUsage, readClaudeCodeLimits, readClaudeCodeCache } from './lib/usage.js';
 import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-statusline.js';
@@ -1464,8 +1464,7 @@ handle('calendar:events', async ({ days = 14, force = false } = {}) => {
     if (result.ok) calendarCache.set(source.id, { at: Date.now(), result });
     return { ...source, ...result, enabled: true };
   }));
-  const events = results.flatMap(result => (result.events || []).map(event => ({ ...event, start: new Date(event.start).getTime(), end: new Date(event.end).getTime(), sourceId: result.id, source: result.name, color: colors[result.id] || null })))
-    .sort((a, b) => a.start - b.start);
+  const events = mergeConsecutive(results.flatMap(result => (result.events || []).map(event => ({ ...event, start: new Date(event.start).getTime(), end: new Date(event.end).getTime(), sourceId: result.id, source: result.name, color: colors[result.id] || null }))));
   return { events, sources: results.map(({ events: list, service, feed, ...rest }) => ({ ...rest, count: list?.length || 0 })) };
 });
 

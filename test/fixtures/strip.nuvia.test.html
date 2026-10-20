@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Extension scripts</title></head>
+<body>
+<!-- Counts its loads. On /strip it removes the mark extensions' scripts leave,
+     as if they had not reached the page (opened before they were registered). -->
+<h1 id="loads"></h1>
+<script>
+  const loads = Number(sessionStorage.getItem('loads') || 0) + 1;
+  sessionStorage.setItem('loads', String(loads));
+  document.getElementById('loads').textContent = String(loads);
+  // After the extension's scripts (they run when the page is idle).
+  if (location.pathname === '/strip') addEventListener('load', () => setTimeout(() => document.documentElement.removeAttribute('data-nuvia-extensions'), 500));
+</script>
+</body></html>

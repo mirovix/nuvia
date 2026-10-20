@@ -80,3 +80,16 @@ test('content scripts get chrome.extension first, except those in the page world
   vm.runInNewContext(CONTENT_SOURCE, existing);
   assert.equal(existing.chrome.extension, own);
 });
+
+test('the content script marks the page with the extension id, top frame only', () => {
+  const attributes = {};
+  const root = { getAttribute: name => attributes[name] ?? null, setAttribute: (name, value) => { attributes[name] = value; } };
+  const window = {};
+  window.top = window;
+  const run = id => vm.runInNewContext(CONTENT_SOURCE, { chrome: { runtime: { id, getURL: path => path } }, document: { documentElement: root }, window, top: window });
+  run('aaa'); run('bbb'); run('aaa');
+  assert.equal(attributes['data-nuvia-extensions'], 'aaa bbb');
+  const frame = {};
+  vm.runInNewContext(CONTENT_SOURCE, { chrome: { runtime: { id: 'ccc', getURL: path => path } }, document: { documentElement: root }, window: frame, top: window });
+  assert.equal(attributes['data-nuvia-extensions'], 'aaa bbb', 'frames do not mark the page');
+});

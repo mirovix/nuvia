@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, startChat, startCodexChat, forgetCodexLimits } from '../../lib/claude-chat.js';
+import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, startChat, startCodexChat, forgetCodexLimits, codexLockdownArgs } from '../../lib/claude-chat.js';
 
 const fake = resolve(import.meta.dirname, '..', 'fixtures', 'fake-claude.mjs');
 
@@ -80,8 +80,8 @@ test('the CLI is found outside PATH, in ~/.local/bin', () => {
   assert.equal(findClaude({ env: { PATH: '/nonexistent' }, home }), join(home, '.local', 'bin', 'claude'));
 });
 
-// ChatGPT through the Codex CLI.
-const fakeCodex = resolve(import.meta.dirname, '..', 'fixtures', 'fake-codex-exec.mjs');
+// ChatGPT through the Codex CLI's app server.
+const fakeCodex = resolve(import.meta.dirname, '..', 'fixtures', 'fake-codex-chat.mjs');
 function codexConverse(env, homes, messages) {
   return new Promise(done => {
     const events = []; let left = messages.length;
@@ -92,30 +92,59 @@ function codexConverse(env, homes, messages) {
     for (const message of messages) chat.send(message);
   });
 }
+const calls = log => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
 
-test('ChatGPT: each message carries the conversation so far, read-only and saving nothing', async () => {
+test('ChatGPT: one locked-down server per conversation, answers streaming', async () => {
+  forgetCodexLimits();
   const tmp = mkdtempSync(join(tmpdir(), 'codex-chat-'));
   const log = join(tmp, 'log');
   const events = await codexConverse({ FAKE_CODEX_LOG: log }, [join(tmp, '.codex')], ['first question', 'second question']);
   assert.deepEqual(events.filter(event => event.type === 'done').map(event => event.text), ['Risposta 1 da .codex', 'Risposta 2 da .codex']);
-  const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  assert.match(calls[0].prompt, /Instructions:\nBe brief\./);
-  assert.match(calls[1].prompt, /\[User\]\nfirst question\n\n\[You\]\nRisposta 1 da \.codex\n\n\[User\]\nsecond question/);
-  for (const flag of ['--ephemeral', '--ignore-user-config', 'read-only']) assert.ok(calls[0].argv.includes(flag), flag);
+  assert.ok(events.filter(event => event.type === 'delta').length > 2, 'the answer streams');
+  const seen = calls(log);
+  assert.equal(seen.filter(line => line.argv).length, 1, 'one server for the whole conversation');
+  const argv = seen.find(line => line.argv).argv;
+  for (const feature of ['shell_tool', 'browser_use', 'computer_use', 'apps', 'image_generation']) assert.ok(argv.join(' ').includes(`--disable ${feature}`), `${feature} off`);
+  assert.ok(!argv.includes('sqlite') && !argv.includes('unified_exec'), 'harmless or already-off features are left alone');
+  assert.ok(argv.includes('mcp_servers={}') && argv.includes('web_search="disabled"'));
+  const thread = seen.find(line => line.thread).thread;
+  assert.equal(thread.ephemeral, true);
+  assert.equal(thread.sandbox, 'read-only');
+  assert.equal(thread.approvalPolicy, 'never');
+  assert.match(thread.developerInstructions, /^Be brief\.\nOnly talk/);
+  assert.deepEqual(seen.filter(line => line.text).map(line => line.text), ['first question', 'second question'], 'the thread keeps the conversation');
 });
 
-test('ChatGPT: an account at its usage limit hands over to the next one', async () => {
+test('ChatGPT: an account at its usage limit hands over to the next, with the conversation', async () => {
   forgetCodexLimits();
   const tmp = mkdtempSync(join(tmpdir(), 'codex-chat-'));
   const homes = ['.codex', '.codex-account1', '.codex-account2'].map(name => join(tmp, name));
-  let events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1' }, homes, ['hello', 'again']);
+  const log = join(tmp, 'log');
+  let events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1', FAKE_CODEX_LOG: log }, homes, ['hello', 'again']);
   assert.deepEqual(events.filter(event => event.type === 'done').map(event => event.text), ['Risposta 1 da .codex-account2', 'Risposta 2 da .codex-account2'], 'and stays on it');
   // The next conversation starts on the account that answered: no time lost on the limited ones.
-  const log = join(tmp, 'log');
-  events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1', FAKE_CODEX_LOG: log }, homes, ['hello']);
-  assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line).home), ['.codex-account2']);
+  const log2 = join(tmp, 'log2');
+  events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1', FAKE_CODEX_LOG: log2 }, homes, ['hello']);
+  assert.deepEqual([...new Set(calls(log2).filter(line => line.argv).map(line => line.home))], ['.codex-account2']);
   forgetCodexLimits();
   events = await codexConverse({ FAKE_CODEX_LIMITED: '.codex,.codex-account1,.codex-account2' }, homes, ['hello']);
   assert.equal(events.at(-1).type, 'error');
   assert.match(events.at(-1).message, /usage limit/);
+});
+
+test('ChatGPT: switching accounts mid-conversation brings the conversation along', async () => {
+  forgetCodexLimits();
+  const tmp = mkdtempSync(join(tmpdir(), 'codex-chat-'));
+  const homes = ['.codex', '.codex-account1'].map(name => join(tmp, name));
+  const log = join(tmp, 'log');
+  const events = await codexConverse({ FAKE_CODEX_LIMIT_AFTER: '1', FAKE_CODEX_LOG: log }, homes, ['first', 'second']);
+  assert.deepEqual(events.filter(event => event.type === 'done').map(event => event.text), ['Risposta 1 da .codex', 'Risposta 1 da .codex-account1 (con la conversazione)']);
+  const handover = calls(log).filter(line => line.text && line.home === '.codex-account1')[0].text;
+  assert.match(handover, /Conversation so far:\n\[User\]\nfirst\n\n\[You\]\nRisposta 1 da \.codex/);
+  assert.match(handover, /\[User\]\nsecond$/);
+});
+
+test('the lockdown follows the features this Codex has', () => {
+  const args = codexLockdownArgs('shell_tool  stable  true\nnew_browser_thing  under development  true\nsqlite stable true\nview_image removed false\n');
+  assert.deepEqual(args, ['--disable', 'shell_tool', '--disable', 'new_browser_thing', '-c', 'mcp_servers={}', '-c', 'web_search="disabled"']);
 });

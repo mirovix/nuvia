@@ -12,7 +12,7 @@ import { parseChatRow, parseMailLines, parseAgendaText, sortFeed, unreadFromTitl
 import { normalizeClaudeLimits, codexUsage, claudeUsage, readClaudeCodeLimits, readClaudeCodeCache } from './lib/usage.js';
 import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-statusline.js';
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
-import { readInfo, defaultRules, extensionHosts, hostAllowed } from './lib/extensions.js';
+import { readInfo, defaultRules, extensionHosts, hostAllowed, contentScriptsRunOn } from './lib/extensions.js';
 import { prepareExtension } from './lib/extension-shim.js';
 import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, startChat, startCodexChat } from './lib/claude-chat.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
@@ -399,6 +399,27 @@ function trackPageLoading(contents, changed = () => {}) {
   contents.on('did-stop-loading', () => set(false));
 }
 
+// At startup every service opens at once, and a page can start before Chromium
+// has registered an extension's scripts with it: it then runs without them until
+// reloaded (Streak missing from two of three Gmail accounts). Each extension's
+// scripts mark the page (lib/extension-shim.js); once the page has loaded, one
+// whose mark is missing gets the page reloaded, once in ten minutes at most.
+const scriptReloadAt = new WeakMap();
+async function checkExtensionScripts(service, contents) {
+  if (contents.isDestroyed()) return;
+  const url = contents.getURL();
+  const expected = session.fromPartition(partitionFor(service.id)).extensions.getAllExtensions().filter(extension => contentScriptsRunOn(extension.manifest, url));
+  if (!expected.length) return;
+  const present = String(await run(contents, `document.documentElement?.getAttribute('data-nuvia-extensions') || ''`, 3000, '') || '').split(' ');
+  const missing = expected.filter(extension => !present.includes(extension.id));
+  if (!missing.length || contents.isDestroyed()) return;
+  const names = missing.map(extension => extension.name).join(', ');
+  if (Date.now() - (scriptReloadAt.get(contents) || 0) < 10 * 60000) { log('extensions', service.name, `${names} still missing after a reload`); return; }
+  scriptReloadAt.set(contents, Date.now());
+  log('extensions', service.name, `${names} did not reach the page: reloading it once`);
+  contents.reload();
+}
+
 function trackState(view, service) {
   const contents = view.webContents;
   const update = extra => {
@@ -419,6 +440,7 @@ function trackState(view, service) {
   contents.on('page-title-updated', () => update());
   contents.on('did-start-loading', () => update({ crashed: false }));
   trackPageLoading(contents, update);
+  contents.on('did-finish-load', () => setTimeout(() => checkExtensionScripts(service, contents).catch(error => log('extensions', service.name, error.message)), 2500));
   // Every page load (a reload too) checks once whether an extension asks to sign in again.
   let reconnectStarted = false; let reconnectRun = 0;
   contents.on('did-navigate', () => { reconnectStarted = false; reconnectRun++; });
@@ -2037,6 +2059,7 @@ function chatError(message, provider = 'claude') {
     if (/not installed|ENOENT/i.test(message)) return 'ChatGPT answers through the Codex CLI, which is not installed on this computer. Install it (npm install -g @openai/codex) and sign in once with `codex login`, or choose Claude in Settings → General.';
     if (/not logged|log ?in|authenticat|401|unauthorized/i.test(message)) return 'Codex is not signed in: run `codex login` in a terminal once, then try again.';
     if (/usage limit|rate limit|quota|try again at/i.test(message)) return `Every ChatGPT account signed in to Codex has reached its limit. ${message}`;
+    if (/did not list its features/i.test(message)) return 'This version of Codex did not say which tools it has, so Nuvia cannot turn them off and will not open the chat. Update Codex (npm install -g @openai/codex), or choose Claude in Settings → General.';
     return `ChatGPT could not answer: ${message}`;
   }
   if (/not installed|ENOENT/i.test(message)) return 'Claude Code is not installed on this computer. Install it from claude.com/claude-code and sign in once by running `claude` in a terminal.';
@@ -2061,7 +2084,9 @@ ipcMain.handle('chat:start', event => {
     const command = process.env.NUVIA_CODEX_CHAT_BIN ? { command: process.env.NUVIA_CODEX_CHAT_BIN, args: [] } : findCodex({ home: homedir() });
     if (!command) return { ...meta, error: chatError('not installed', 'codex'), fallback: true };
     const extra = String(process.env.NUVIA_CODEX_HOMES || '').split(delimiter).filter(Boolean); // tests
-    const homes = codexHomes({ home: TEST ? undefined : homedir(), primary: CODEX_HOME, extra });
+    // Accounts the Claude & Codex page already knows are at their limit go last.
+    const full = home => { const live = codexLive.get(home)?.value; return Boolean(live?.limitReached || live?.session?.percent >= 100 || live?.weekly?.percent >= 100); };
+    const homes = codexHomes({ home: TEST ? undefined : homedir(), primary: CODEX_HOME, extra }).sort((a, b) => full(a) - full(b));
     chat.conversation = startCodexChat({ command, homes, system: chat.system, cwd: folder, onEvent });
   } else {
     const command = process.env.NUVIA_CLAUDE_BIN || findClaude({ home: homedir() });

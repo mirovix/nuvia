@@ -100,7 +100,7 @@ test('right click menu, Ask Claude on a selection, Reply with Claude in Gmail', 
 });
 
 // ChatGPT chosen in Settings: the same tools, answered by the Codex CLI
-// (test/fixtures/fake-codex-exec.mjs), on the first account not at its limit.
+// (test/fixtures/fake-codex-chat.mjs), on the first account not at its limit.
 test('with ChatGPT chosen, Ask and Reply are answered by Codex', { timeout: 120000 }, async () => {
   const app = await launch({
     prepare: profile => {
@@ -114,7 +114,7 @@ test('with ChatGPT chosen, Ask and Reply are answered by Codex', { timeout: 1200
       process.env.NUVIA_CODEX_HOMES = join(profile, 'codex-work');
       writeProfile(profile, { 'services.json': [{ id: 'gmail', name: 'Gmail Test', url: 'https://mail.google.com/mail/u/0/#inbox' }], 'preferences.json': { chatLanguage: 'Italian', chatProvider: 'codex' } });
     },
-    env: { NUVIA_CODEX_CHAT_BIN: join(project, 'test', 'fixtures', 'fake-codex-exec.mjs'), FAKE_CODEX_LIMITED: '.codex' }
+    env: { NUVIA_CODEX_CHAT_BIN: join(project, 'test', 'fixtures', 'fake-codex-chat.mjs'), FAKE_CODEX_LIMITED: '.codex' }
   });
   const nuviaLog = () => { try { return readFileSync(join(app.profile, 'nuvia.log'), 'utf8'); } catch { return ''; } };
   let ui; let gmail; let ask;

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, shell, Notification, Menu, screen, components, safeStorage, protocol } from 'electron';
-import { join, extname, resolve, sep, dirname, delimiter } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync, accessSync, constants as fsConstants } from 'node:fs';
+import { join, extname, resolve, sep, dirname, delimiter, basename } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync, accessSync, realpathSync, constants as fsConstants } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { homedir, userInfo } from 'node:os';
 import { Worker } from 'node:worker_threads';
@@ -12,7 +12,8 @@ import { parseChatRow, parseMailLines, parseAgendaText, sortFeed, unreadFromTitl
 import { normalizeClaudeLimits, codexUsage, claudeUsage, readClaudeCodeLimits, readClaudeCodeCache } from './lib/usage.js';
 import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-statusline.js';
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
-import { readInfo, defaultRules } from './lib/extensions.js';
+import { readInfo, defaultRules, extensionHosts, hostAllowed } from './lib/extensions.js';
+import { prepareExtension } from './lib/extension-shim.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
@@ -225,15 +226,121 @@ function sameServiceFamily(target, source) {
   } catch { return false; }
 }
 
+const realpathOr = path => { try { return realpathSync(path); } catch { return path; } };
+
+// Links that leave the service go to the system browser (tests only log them).
+const openOutside = url => (TEST ? log('external', url) : shell.openExternal(url));
+
+// Extensions that sign in through a window and keep the session only in memory:
+// after a restart they ask again. Streak does ("Accedi per usare Streak"). Once
+// the user has connected it in a service, Nuvia clicks its sign-in button again
+// after a restart, with the window hidden: it completes by itself (Google's
+// account choice, the saved UniPD sign-in) and is shown only if it needs you.
+const RECONNECT = [{
+  id: 'pnnfemgpilpdaojpnkjdgfgbnnjojfik', name: 'Streak',
+  prompt: /Accedi per usare Streak|Sign in to use Streak/i,
+  button: /^(Accedi con Google|Sign in with Google)$/i,
+  done: /(^|\.)streak\.com$/i
+}];
+const reconnectFile = () => fileInProfile('extension-sessions.json');
+const quietWindows = new Map(); // service id → until when its sign-in window stays hidden
+const reconnectTries = new Map();
+function markConnected(service, host) {
+  const entry = RECONNECT.find(item => item.done.test(host));
+  if (!entry) return;
+  const saved = readJson(reconnectFile(), {});
+  (saved[service.id] ||= {})[entry.id] = Date.now();
+  writeJson(reconnectFile(), saved);
+}
+function reconnectScript(prompt, button) {
+  const all = [];
+  const walk = root => { for (const el of root.querySelectorAll('*')) { all.push(el); if (el.shadowRoot) walk(el.shadowRoot); } };
+  walk(document);
+  const shown = el => { const box = el.getBoundingClientRect(); return box.width > 0 && box.height > 0; };
+  if (!all.some(el => shown(el) && new RegExp(prompt, 'i').test(el.textContent || '') && (el.textContent || '').length < 400)) return 'connected';
+  const target = all.filter(el => (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button') && shown(el) && new RegExp(button, 'i').test((el.textContent || '').trim())).sort((a, b) => a.textContent.length - b.textContent.length)[0];
+  if (!target) return 'no button';
+  target.click();
+  return 'clicked';
+}
+async function reconnectExtensions(service, contents) {
+  const saved = readJson(reconnectFile(), {})[service.id] || {};
+  for (const entry of RECONNECT) {
+    if (!saved[entry.id] || contents.isDestroyed()) continue;
+    const dir = extensionDirs().find(item => extensionIdOf(item) === entry.id);
+    if (!dir || rulesFor(dir)[service.id] !== true) continue;
+    // Never a loop: a sign-in that did not take (the prompt still there a minute
+    // later) counts as failed; after 3 failures in 10 minutes Nuvia stops trying.
+    const key = `${service.id}:${entry.id}`;
+    const failed = (reconnectTries.get(key) || []).filter(at => Date.now() - at < 10 * 60000);
+    reconnectTries.set(key, failed);
+    if (failed.length >= 3) continue;
+    // The extension draws its prompt a few seconds after the page.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await sleep(3000);
+      if (contents.isDestroyed()) return;
+      quietWindows.set(service.id, Date.now() + 20000);
+      const result = await run(contents, `(${reconnectScript.toString()})(${JSON.stringify(entry.prompt.source)}, ${JSON.stringify(entry.button.source)})`, 4000, 'error');
+      if (result === 'clicked') {
+        log('reconnect', service.name, entry.name, 'signing in again');
+        setTimeout(async () => {
+          if (contents.isDestroyed()) return;
+          const after = await run(contents, `(${reconnectScript.toString()})(${JSON.stringify(entry.prompt.source)}, '^$')`, 4000, 'error');
+          if (after !== 'connected') { failed.push(Date.now()); log('reconnect', service.name, entry.name, 'did not take'); }
+        }, 60000);
+        break;
+      }
+      if (result === 'connected' && attempt >= 3) { quietWindows.delete(service.id); break; }
+    }
+  }
+}
+
+// Every extension load goes through here: the shim must be in place first.
+function loadExtensionInto(target, dir) {
+  try { prepareExtension(dir); } catch (error) { log('extension shim', dir, error.message); }
+  return target.extensions.loadExtension(dir, { allowFileAccess: true });
+}
+
+// An extension turned on for this service may open its own sign-in window
+// (Streak: streak.com, mailfoogae.appspot.com): keep it in the service's profile.
+function extensionWindowHost(service, host) {
+  for (const dir of extensionDirs()) {
+    if (rulesFor(dir)[service.id] !== true) continue;
+    const manifest = readJson(join(dir, 'manifest.json'), {});
+    if (hostAllowed(host, extensionHosts(manifest))) return true;
+  }
+  return false;
+}
+
 function wireContents(contents, service, key) {
+  // Sign-in windows a service opens (Streak's Google sign-in going through the
+  // UniPD SSO) get the automatic sign-in too, with their own state.
+  contents.on('did-create-window', child => {
+    const popup = child.webContents;
+    const stateKey = `${service.id}#window`;
+    // A sign-in that ends on the extension's own site: remember it is connected.
+    popup.on('did-navigate', (_, url) => markConnected(service, hostOf(url)));
+    // Opened hidden by an automatic reconnection: show it if it still needs you.
+    if (!child.isVisible()) {
+      quietWindows.delete(service.id);
+      setTimeout(() => {
+        if (child.isDestroyed()) return;
+        child.show();
+        addNotification({ title: service.name, body: 'Streak needs you to finish signing in: the window is open.', type: 'warning', serviceId: service.id });
+      }, 15000);
+    }
+    popup.on('did-stop-loading', () => watchSignIn(service, popup, stateKey));
+    popup.on('did-navigate-in-page', (_, url, isMainFrame) => { if (isMainFrame !== false && isSignInUrl(url)) setTimeout(() => watchSignIn(service, popup, stateKey), 600); });
+  });
   followGoogleSignIn(contents);
   contents.setWindowOpenHandler(({ url }) => {
     if (!/^https?:|^about:blank/i.test(url)) return { action: 'deny' };
     let host = ''; try { host = new URL(url).hostname; } catch {}
-    if (url.startsWith('about:blank') || AUTH_HOSTS.test(host) || sameSite(url, service.url) || sameServiceFamily(url, service.url)) {
-      return { action: 'allow', overrideBrowserWindowOptions: { width: 560, height: 760, autoHideMenuBar: true, backgroundColor: '#ffffff', webPreferences: { partition: partitionFor(service.id), preload: join(import.meta.dirname, 'preload-service.cjs'), sandbox: true, contextIsolation: true } } };
+    if (url.startsWith('about:blank') || AUTH_HOSTS.test(host) || sameSite(url, service.url) || sameServiceFamily(url, service.url) || extensionWindowHost(service, host)) {
+      const quiet = (quietWindows.get(service.id) || 0) > Date.now();
+      return { action: 'allow', overrideBrowserWindowOptions: { show: !quiet, width: 560, height: 760, autoHideMenuBar: true, backgroundColor: '#ffffff', webPreferences: { partition: partitionFor(service.id), preload: join(import.meta.dirname, 'preload-service.cjs'), sandbox: true, contextIsolation: true } } };
     }
-    shell.openExternal(url);
+    openOutside(url);
     return { action: 'deny' };
   });
   contents.on('will-navigate', (event, url) => { if (!/^https?:/i.test(url)) event.preventDefault(); });
@@ -263,7 +370,13 @@ function trackState(view, service) {
   };
   contents.on('page-title-updated', () => update());
   contents.on('did-start-loading', () => update({ crashed: false }));
-  contents.on('did-stop-loading', () => { update(); watchSignIn(service, contents); });
+  // Every page load (a reload too) checks once whether an extension asks to sign in again.
+  let reconnectStarted = false;
+  contents.on('did-navigate', () => { reconnectStarted = false; });
+  contents.on('did-stop-loading', () => {
+    update(); watchSignIn(service, contents);
+    if (!reconnectStarted && !isSignInUrl(contents.getURL())) { reconnectStarted = true; reconnectExtensions(service, contents).catch(error => log('reconnect', service.name, error.message)); }
+  });
   contents.on('did-navigate-in-page', (_, url, isMainFrame) => { if (isMainFrame !== false && isSignInUrl(url)) setTimeout(() => watchSignIn(service, contents), 600); });
   contents.on('did-navigate-in-page', () => update());
   contents.on('page-favicon-updated', (_, favicons) => update({ favicon: favicons.find(icon => /^https:|^data:/.test(icon)) || '' }));
@@ -324,7 +437,9 @@ function retryFailedLoads(view, service, firstUrl) {
   contents.once('destroyed', () => { clearTimeout(timer); failedLoads.delete(contents.id); });
 }
 
+let lastServiceId = null; // the last service shown, for menus opened from elsewhere
 async function activate(service, { key = service.id, url } = {}) {
+  lastServiceId = service.id;
   const previous = views.get(activeKey);
   const view = await createServiceView(service, key, url || service.url);
   failedLoads.get(view.webContents.id)?.(); // opened while its page had failed: try again now
@@ -425,11 +540,11 @@ async function onSignInPage(service, contents) {
   return Boolean(await run(contents, `(${looksLikeSignInForm.toString()})()`, 3000, false));
 }
 
-async function watchSignIn(service, contents) {
+async function watchSignIn(service, contents, stateKey = service.id) {
   if (contents.isDestroyed()) return;
   const url = contents.getURL();
-  const state = signInState.get(service.id) || { attempts: [], passwords: [], inFlow: false, noticeAt: 0, mfaAt: 0, failedAt: 0, signedIn: false };
-  signInState.set(service.id, state);
+  const state = signInState.get(stateKey) || { attempts: [], passwords: [], inFlow: false, noticeAt: 0, mfaAt: 0, failedAt: 0, signedIn: false };
+  signInState.set(stateKey, state);
   if (!(await onSignInPage(service, contents))) {
     if (state.inFlow) log('sign-in', service.name, state.auto ? 'signed back in automatically' : 'left the sign-in page', hostOf(url));
     if (state.inFlow && state.auto) addNotification({ title: service.name, body: 'Signed back in automatically.', type: 'success', serviceId: service.id });
@@ -470,13 +585,13 @@ async function watchSignIn(service, contents) {
     await sleep(900);
     action = await run(contents, `(${fillSignIn.toString()})(${JSON.stringify(credentials.username)}, ${JSON.stringify(credentials.password)})`, 5000, 'none');
   } finally { state.busy = false; }
-  if (state.again) { state.again = false; if (action === 'none') setTimeout(() => { if (!contents.isDestroyed()) watchSignIn(service, contents); }, 600); }
+  if (state.again) { state.again = false; if (action === 'none') setTimeout(() => { if (!contents.isDestroyed()) watchSignIn(service, contents, stateKey); }, 600); }
   // Which site and which step, never what was typed: enough to see where a sign-in stops.
-  log('sign-in', service.name, hostOf(url), action);
+  log('sign-in', service.name + (stateKey === service.id ? '' : ' (window)'), hostOf(url), action);
   if (action !== 'none') state.auto = true;
   if (action === 'password') state.passwords.push(Date.now());
   // Multi-step pages (email, then password) change without a reload: look again.
-  if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(async () => { if (await onSignInPage(service, contents)) watchSignIn(service, contents); }, 2500);
+  if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(async () => { if (await onSignInPage(service, contents)) watchSignIn(service, contents, stateKey); }, 2500);
   if (action === 'mfa' && Date.now() - state.mfaAt > 30 * 60000) {
     state.mfaAt = Date.now();
     addNotification({ title: service.name, body: 'Sign-in needs your second factor (code or approval). Open the service to finish.', type: 'warning', serviceId: service.id });
@@ -573,9 +688,14 @@ async function loadExtensionsNow(serviceSession, service) {
   if (!pending.length) return;
   setGuard(service.id, pending.map(extensionIdOf));
   for (const dir of pending) {
-    try { await serviceSession.extensions.loadExtension(dir, { allowFileAccess: true }); }
+    try { await loadExtensionInto(serviceSession, dir); }
     catch (error) { log('extension', dir, error.message); }
   }
+  // loadExtension() resolves a moment before Chromium has registered the
+  // extension's content scripts with the page processes: a page started right
+  // away (the first service at startup) came up without them (Streak missing
+  // in Gmail until a reload). Give the registration a moment.
+  await sleep(600);
 }
 
 function extensionList() {
@@ -665,7 +785,7 @@ async function installMarketplaceExtension(id) {
   for (const service of services()) {
     if (rules[id][service.id] === false || !sessionsPrepared.has(service.id)) continue;
     setGuard(service.id, [id]);
-    try { await queued(() => session.fromPartition(partitionFor(service.id)).extensions.loadExtension(dir, { allowFileAccess: true })); } catch (error) { log('extension', id, error.message); }
+    try { await queued(() => loadExtensionInto(session.fromPartition(partitionFor(service.id)), dir)); } catch (error) { log('extension', id, error.message); }
     releaseGuard(service.id);
   }
   const enabledOn = services().filter(service => rules[id][service.id] !== false).map(service => service.name);
@@ -1029,7 +1149,7 @@ handle('extensions:toggle', async (marketplaceId, serviceId, enabled) => {
   if (!sessionsPrepared.has(serviceId)) return rulesFor(dir);
   const target = session.fromPartition(partitionFor(serviceId));
   const loaded = target.extensions.getAllExtensions().find(extension => extension.path === dir);
-  if (enabled && !loaded) { setGuard(serviceId, [marketplaceId]); try { await queued(() => target.extensions.loadExtension(dir, { allowFileAccess: true })); } finally { releaseGuard(serviceId); } views.get(serviceId)?.webContents.reload(); }
+  if (enabled && !loaded) { setGuard(serviceId, [marketplaceId]); try { await queued(() => loadExtensionInto(target, dir)); } finally { releaseGuard(serviceId); } views.get(serviceId)?.webContents.reload(); }
   if (!enabled && loaded) { target.extensions.removeExtension(loaded.id); views.get(serviceId)?.webContents.reload(); }
   return rulesFor(dir);
 });
@@ -1045,18 +1165,35 @@ handle('extensions:remove', async id => {
   if (dir?.startsWith(paths.extensionRoot())) rmSync(dir, { recursive: true, force: true });
   return extensionList();
 });
-handle('extensions:popup', async marketplaceId => {
-  const serviceId = activeKey?.split('#')[0];
+handle('extensions:popup', async (marketplaceId, fromService) => {
+  // The service the menu was opened from, else the one on screen.
+  const serviceId = (fromService && serviceById(fromService) ? fromService : null) || activeKey?.split('#')[0] || lastServiceId;
   const dir = extensionDirs().find(path => extensionIdOf(path) === marketplaceId);
   const info = dir && readInfo(dir);
-  if (!serviceId || !info?.popup) return false;
-  const loaded = session.fromPartition(partitionFor(serviceId)).extensions.getAllExtensions().find(extension => extension.path === dir);
-  if (!loaded) return false;
+  const refuse = reason => { log('extension popup', marketplaceId, reason); return { opened: false, reason }; };
+  if (!info?.popup) return refuse('this extension has no menu');
+  if (!serviceId) return refuse('open a service first: the menu works on the page you have open');
+  if (rulesFor(dir)[serviceId] === false) return refuse(`it is turned off for ${serviceById(serviceId)?.name || 'this service'}`);
+  const extensionsHere = () => session.fromPartition(partitionFor(serviceId)).extensions.getAllExtensions();
+  // Electron may report the folder resolved differently: compare the folder name too.
+  const same = extension => extension.path === dir || basename(extension.path) === basename(dir) || realpathOr(extension.path) === realpathOr(dir);
+  let loaded = extensionsHere().find(same);
+  if (!loaded) { await loadExtensionsFor(session.fromPartition(partitionFor(serviceId)), serviceById(serviceId)); loaded = extensionsHere().find(same); }
+  if (!loaded) return refuse('it is not loaded in this service yet: reload the page');
   const cursor = screen.getCursorScreenPoint();
-  const popup = new BrowserWindow({ width: 380, height: 560, x: cursor.x - 360, y: cursor.y + 16, parent: mainWindow, autoHideMenuBar: true, title: info.name, webPreferences: { partition: partitionFor(serviceId), sandbox: true, contextIsolation: true } });
-  popup.on('blur', () => { if (!popup.isDestroyed()) popup.close(); });
+  // Electron calls the focused page the "active tab". A menu that took the focus
+  // would find itself when it asks which page it is for (AdBlock: "Nothing to
+  // block here!"). It opens without the focus, so the service stays the active
+  // tab while the menu reads it; clicking the menu then focuses it as usual.
+  const page = views.get(serviceId)?.webContents;
+  const popup = new BrowserWindow({ show: false, focusable: true, width: 380, height: 560, x: cursor.x - 360, y: cursor.y + 16, parent: mainWindow, autoHideMenuBar: true, title: info.name, webPreferences: { partition: partitionFor(serviceId), sandbox: true, contextIsolation: true } });
+  let focusedOnce = false;
+  popup.on('focus', () => { focusedOnce = true; });
+  popup.on('blur', () => { if (focusedOnce && !popup.isDestroyed()) popup.close(); });
+  if (page && !page.isDestroyed()) page.focus();
+  popup.once('ready-to-show', () => { if (!popup.isDestroyed()) popup.showInactive(); });
   popup.loadURL(`chrome-extension://${loaded.id}/${info.popup}`);
-  return true;
+  return { opened: true };
 });
 
 // ---------------------------------------------------------------------------

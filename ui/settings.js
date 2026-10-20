@@ -149,7 +149,12 @@ export function renderExtensionToolbar() {
   if (state.route !== 'service') return fill(bar);
   fill(bar, state.extensions.filter(extension => extension.rules?.[state.serviceId] !== false).map(extension => h('button.ext-pill', {
     title: extension.popup ? `${extension.name} — open` : extension.name,
-    on: { click: async () => { if (!extension.popup || !await api.extensionPopup(extension.id)) openExtensions(); } }
+    on: { click: async () => {
+      if (!extension.popup) return openExtensions();
+      // Its own menu, for the page that is open; if it cannot open, say why.
+      const result = await api.extensionPopup(extension.id, state.serviceId);
+      if (!result?.opened) toast(`${extension.name}: ${result?.reason || 'its menu could not open'}`, { action: { label: 'Extensions', run: openExtensions } });
+    } }
   }, extension.icon ? h('img', { src: extension.icon, alt: '' }) : extension.name[0])));
 }
 

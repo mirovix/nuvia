@@ -127,7 +127,11 @@ Turn it off in **Settings → General → Update automatically**; check by hand 
 
 Search the Chrome Web Store from **Extensions** and install with one click. By default an extension is enabled only on the services it targets (Streak, for example, only on Gmail), and you can switch it on or off per service.
 
-Electron supports a subset of the Chrome extension APIs. If an extension crashes Nuvia, or crashes a service repeatedly, Nuvia disables it on that service and tells you.
+Electron supports a subset of the Chrome extension APIs. Nuvia fills in the ones an extension's background needs to start (`permissions`, `alarms`, `webNavigation`, `windows`…), so extensions like Streak and AdBlock run; their sign-in windows open inside the service, and an extension's toolbar menu works on the page it was opened from. If an extension crashes Nuvia, or crashes a service repeatedly, Nuvia disables it on that service and tells you.
+
+**Streak** keeps its sign-in only in memory, so it asks again after every reload or restart. After you connect it once, Nuvia signs it back in by itself each time, with the sign-in window hidden; the window shows only if it needs you (a new password, a second factor).
+
+**AdBlock** starts and its menu works, but Electron does not apply its blocking rules: it blocks nothing for now.
 
 ## Integrations
 

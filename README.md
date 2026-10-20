@@ -188,6 +188,8 @@ git push origin v0.6.0
 
 The [Release workflow](.github/workflows/release.yml) builds on Linux, Windows and macOS and publishes every file to a new GitHub Release.
 
+Windows and macOS builds are **VMP-signed** with [castlabs EVS](https://github.com/castlabs/electron-releases/wiki/EVS): without it, Widevine refuses Spotify's licences and playback stops after a few seconds. Create a free EVS account once (`python3 -m pip install castlabs-evs && python3 -m castlabs_evs.account signup`) and add its name and password as the repository secrets `EVS_ACCOUNT_NAME` and `EVS_PASSWD`; the release workflow then signs and verifies every package. Without the secrets it still builds, unsigned, with a warning.
+
 ## Credits
 
 [Electron](https://www.electronjs.org/) (castlabs ECS build), [Leaflet](https://leafletjs.com/) and © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, [Nominatim](https://nominatim.org/) geocoding, [OSRM](https://project-osrm.org/) routing on FOSSGIS servers, [Open-Meteo](https://open-meteo.com/) weather, [Lucide](https://lucide.dev/) icons (ISC), Instrument Sans, Instrument Serif and JetBrains Mono fonts (SIL OFL). Details in [THIRD_PARTY.md](THIRD_PARTY.md).

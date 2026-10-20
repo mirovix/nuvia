@@ -34,15 +34,38 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - if: runner.os != 'Linux'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y rpm
       - run: npm ci
       - run: npm test
+      # Widevine on Windows and macOS needs a castlabs VMP signature, or Spotify
+      # stops after a few seconds (issue #1). Signed with the castlabs EVS
+      # account in the EVS_ACCOUNT_NAME / EVS_PASSWD secrets (scripts/after-pack.cjs).
+      - name: VMP signing (castlabs EVS)
+        id: vmp
+        if: runner.os != 'Linux'
+        shell: bash
+        env:
+          EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
+          EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
+        run: |
+          if [ -z "$EVS_ACCOUNT_NAME" ] || [ -z "$EVS_PASSWD" ]; then
+            echo "::warning::No castlabs EVS account (EVS_ACCOUNT_NAME, EVS_PASSWD): the ${{ runner.os }} build is not VMP-signed and Spotify will not play in it."
+            exit 0
+          fi
+          python3 -m pip install --upgrade castlabs-evs || python -m pip install --upgrade castlabs-evs
+          python3 -m castlabs_evs.account -n reauth || python -m castlabs_evs.account -n reauth
+          echo "sign=1" >> "$GITHUB_OUTPUT"
       - name: Build packages
         run: npx electron-builder ${{ matrix.target }} --publish never
         env:
-          # No Apple/Windows code-signing certificates: build unsigned.
+          # No Apple/Windows code-signing certificates: build unsigned (but VMP-signed).
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          NUVIA_VMP_SIGN: ${{ steps.vmp.outputs.sign }}
       - uses: actions/upload-artifact@v4
         with:
           name: nuvia-${{ runner.os }}

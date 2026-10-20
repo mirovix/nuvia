@@ -3,12 +3,14 @@
 // `claude -p --input-format stream-json --output-format stream-json`.
 // FAKE_CLAUDE_LOG: file that gets the arguments and every message received.
 // FAKE_CLAUDE_FAIL=auth: every answer fails as when Claude Code is signed out.
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const record = value => { if (process.env.FAKE_CLAUDE_LOG) appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify(value)}\n`); };
 const out = value => process.stdout.write(`${JSON.stringify(value)}\n`);
-record({ argv: process.argv.slice(2), cwd: process.cwd() });
+const argv = process.argv.slice(2);
+const file = argv[argv.indexOf('--system-prompt-file') + 1];
+record({ argv, cwd: process.cwd(), system: argv.includes('--system-prompt-file') ? readFileSync(file, 'utf8') : null });
 out({ type: 'system', subtype: 'init', session_id: 'fake' });
 
 function answer(text) {

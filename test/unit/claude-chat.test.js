@@ -1,26 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, startChat } from '../../lib/claude-chat.js';
 
 const fake = resolve(import.meta.dirname, '..', 'fixtures', 'fake-claude.mjs');
 
-function converse(env, messages) {
+function converse(env, messages, cwd = tmpdir()) {
   return new Promise(done => {
     const events = []; let left = messages.length;
-    const chat = startChat({ command: fake, system: 'test', cwd: tmpdir(), env: { ...process.env, ...env }, onEvent: event => {
+    // Through node: Windows cannot run a .mjs file as a program.
+    const chat = startChat({ command: process.execPath, args: [fake], system: 'test', cwd, env: { ...process.env, ...env }, onEvent: event => {
       events.push(event);
-      if (event.type === 'done' || event.type === 'error') { if (--left === 0) { chat.stop(); done(events); } }
+      if (event.type === 'error' || (event.type === 'done' && --left === 0)) { chat.stop(); done(events); }
     } });
     for (const message of messages) chat.send(message);
   });
 }
 
 test('a conversation streams each answer and keeps going', async () => {
-  const log = join(mkdtempSync(join(tmpdir(), 'claude-chat-')), 'log');
-  const events = await converse({ FAKE_CLAUDE_LOG: log }, ['Help me reply to this email.', 'Giovedì va bene.']);
+  const tmp = mkdtempSync(join(tmpdir(), 'claude-chat-'));
+  const log = join(tmp, 'log');
+  const events = await converse({ FAKE_CLAUDE_LOG: log }, ['Help me reply to this email.', 'Giovedì va bene.'], tmp);
   const done = events.filter(event => event.type === 'done');
   assert.equal(done.length, 2);
   assert.match(done[0].text, /Giovedì alle 10/);
@@ -28,6 +30,8 @@ test('a conversation streams each answer and keeps going', async () => {
   assert.equal(extractReply(done[1].text), 'Ciao Anna,\n\ngrazie per le note: giovedì alle 10 va benissimo.\n\nMiro');
   const lines = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   assert.deepEqual(lines.filter(line => line.user).map(line => line.user), ['Help me reply to this email.', 'Giovedì va bene.'], 'the second message waits for the first answer');
+  assert.equal(lines.find(line => line.argv).system, 'test', 'the instructions reach Claude through their file');
+  assert.deepEqual(readdirSync(tmp).filter(name => name.startsWith('instructions-')), [], 'and the file is gone afterwards');
 });
 
 test('Claude Code failing reaches the window as an error', async () => {
@@ -42,12 +46,12 @@ test('a missing command is an error, not a crash', async () => {
 });
 
 test('Claude runs with no tools, MCP servers or user settings', () => {
-  const args = claudeArgs({ system: 'S', model: 'sonnet' });
+  const args = claudeArgs({ systemFile: '/tmp/s.txt', model: 'sonnet' });
   const after = flag => args[args.indexOf(flag) + 1];
   assert.equal(after('--tools'), '');
   assert.equal(after('--setting-sources'), '');
   assert.ok(args.includes('--strict-mcp-config') && args.includes('--no-session-persistence'));
-  assert.equal(after('--system-prompt'), 'S');
+  assert.equal(after('--system-prompt-file'), '/tmp/s.txt');
 });
 
 test('prompts carry the selection and the email thread', () => {

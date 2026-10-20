@@ -68,7 +68,7 @@ test('right click menu, Ask Claude on a selection, Reply with Claude in Gmail', 
     assert.ok(saw.some(line => line.user === 'E in inglese?'), 'the follow-up reached Claude');
     const argv = saw.find(line => line.argv).argv;
     assert.equal(argv[argv.indexOf('--tools') + 1], '', 'no tools');
-    assert.match(argv[argv.indexOf('--system-prompt') + 1], /Answer in Italian/);
+    assert.match(saw.find(line => line.argv).system, /Answer in Italian/);
     await ask.eval('window.nuviaChat.close(); return true').catch(() => {});
     ask.close(); ask = null;
 
@@ -82,7 +82,7 @@ test('right click menu, Ask Claude on a selection, Reply with Claude in Gmail', 
     const first = saw.filter(line => line.user).at(-1).user;
     assert.match(first, /Subject: Meeting notes/);
     assert.match(first, /from Anna Rossi <anna@example\.com>, Tue 29 Sep 2026, 09:12\nHere are today's notes/);
-    assert.match(saw.filter(line => line.argv).at(-1).argv.join(' '), /Sign it as Miro/);
+    assert.match(saw.filter(line => line.argv).at(-1).system, /Sign it as Miro/);
     // "Write it now": the draft, then into Gmail's reply box.
     await reply.eval(`[...document.querySelectorAll('.chat-chips button')].find(b => b.textContent === 'Write it now').click(); return true`);
     await reply.waitFor(`document.querySelector('.chat-draft-actions .btn.accent')`, { timeout: 20000 });

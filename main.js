@@ -129,13 +129,18 @@ function notifyState() { notifyRenderer('services:state', [...serviceState.value
 const attached = view => mainWindow.contentView.children.includes(view);
 
 function detach(view) { if (view && attached(view)) mainWindow.contentView.removeChildView(view); }
+// Only service pages are ever added to the window: whatever else is attached
+// goes, so a page can never stay on top of the overview or another service.
+function detachOthers(keep) { for (const child of [...mainWindow.contentView.children]) if (child !== keep) mainWindow.contentView.removeChildView(child); }
 function showActive() {
   const view = views.get(activeKey);
   if (!view || overlayDepth > 0) return;
+  detachOthers(view);
   if (!attached(view)) mainWindow.contentView.addChildView(view);
   view.setBounds(hostBounds);
 }
-function showDashboard() { detach(views.get(activeKey)); activeKey = null; }
+let activation = 0; // the latest service asked for: an older one still opening is not shown
+function showDashboard() { activation++; detachOthers(null); activeKey = null; }
 
 const sessionsPrepared = new Set();
 function prepareSession(serviceId) {
@@ -245,7 +250,10 @@ const RECONNECT = [{
 }];
 const reconnectFile = () => fileInProfile('extension-sessions.json');
 const quietWindows = new Map(); // service id → until when its sign-in window stays hidden
+const windowProgress = new WeakMap(); // hidden sign-in window → when it last moved on
+const revealWindow = new WeakMap(); // hidden sign-in window → shows it
 const reconnectTries = new Map();
+const reconnectClicked = new Map(); // service:extension → when its sign-in button was last clicked
 function markConnected(service, host) {
   const entry = RECONNECT.find(item => item.done.test(host));
   if (!entry) return;
@@ -264,7 +272,7 @@ function reconnectScript(prompt, button) {
   target.click();
   return 'clicked';
 }
-async function reconnectExtensions(service, contents) {
+async function reconnectExtensions(service, contents, current = () => true) {
   const saved = readJson(reconnectFile(), {})[service.id] || {};
   for (const entry of RECONNECT) {
     if (!saved[entry.id] || contents.isDestroyed()) continue;
@@ -279,10 +287,14 @@ async function reconnectExtensions(service, contents) {
     // The extension draws its prompt a few seconds after the page.
     for (let attempt = 0; attempt < 8; attempt++) {
       await sleep(3000);
-      if (contents.isDestroyed()) return;
+      // A newer page load (Gmail redirects a few times) has its own check: one at a time.
+      if (contents.isDestroyed() || !current()) return;
+      // One sign-in window at a time: two would race through Google.
+      if (Date.now() - (reconnectClicked.get(key) || 0) < 45000) return;
       quietWindows.set(service.id, Date.now() + 20000);
       const result = await run(contents, `(${reconnectScript.toString()})(${JSON.stringify(entry.prompt.source)}, ${JSON.stringify(entry.button.source)})`, 4000, 'error');
       if (result === 'clicked') {
+        reconnectClicked.set(key, Date.now());
         log('reconnect', service.name, entry.name, 'signing in again');
         setTimeout(async () => {
           if (contents.isDestroyed()) return;
@@ -321,14 +333,29 @@ function wireContents(contents, service, key) {
     const stateKey = `${service.id}#window`;
     // A sign-in that ends on the extension's own site: remember it is connected.
     popup.on('did-navigate', (_, url) => markConnected(service, hostOf(url)));
-    // Opened hidden by an automatic reconnection: show it if it still needs you.
+    // Opened hidden by an automatic reconnection: it stays hidden while the
+    // sign-in moves on by itself, and shows only when it needs you (a second
+    // factor, a refused password) or stops moving.
     if (!child.isVisible()) {
       quietWindows.delete(service.id);
-      setTimeout(() => {
-        if (child.isDestroyed()) return;
+      // Done (or closed): the next reload may reconnect again straight away.
+      child.on('closed', () => { for (const entry of RECONNECT) reconnectClicked.delete(`${service.id}:${entry.id}`); });
+      const opened = Date.now();
+      windowProgress.set(popup, opened);
+      const reveal = () => {
+        if (child.isDestroyed() || child.isVisible()) return;
+        clearInterval(timer);
+        log('reconnect', service.name, 'sign-in window shown', hostOf(popup.getURL()), pathOf(popup.getURL()));
         child.show();
         addNotification({ title: service.name, body: 'Streak needs you to finish signing in: the window is open.', type: 'warning', serviceId: service.id });
-      }, 15000);
+      };
+      revealWindow.set(popup, reveal);
+      const timer = setInterval(() => {
+        if (child.isDestroyed()) return clearInterval(timer);
+        if (Date.now() - windowProgress.get(popup) > 25000 || Date.now() - opened > 120000) reveal();
+      }, 2500);
+      popup.on('did-navigate', () => windowProgress.set(popup, Date.now()));
+      popup.on('did-navigate-in-page', () => windowProgress.set(popup, Date.now()));
     }
     popup.on('context-menu', (_, params) => contextMenu(popup, params, null));
     popup.on('did-stop-loading', () => watchSignIn(service, popup, stateKey));
@@ -374,11 +401,11 @@ function trackState(view, service) {
   contents.on('page-title-updated', () => update());
   contents.on('did-start-loading', () => update({ crashed: false }));
   // Every page load (a reload too) checks once whether an extension asks to sign in again.
-  let reconnectStarted = false;
-  contents.on('did-navigate', () => { reconnectStarted = false; });
+  let reconnectStarted = false; let reconnectRun = 0;
+  contents.on('did-navigate', () => { reconnectStarted = false; reconnectRun++; });
   contents.on('did-stop-loading', () => {
     update(); watchSignIn(service, contents);
-    if (!reconnectStarted && !isSignInUrl(contents.getURL())) { reconnectStarted = true; reconnectExtensions(service, contents).catch(error => log('reconnect', service.name, error.message)); }
+    if (!reconnectStarted && !isSignInUrl(contents.getURL())) { reconnectStarted = true; const run = reconnectRun; reconnectExtensions(service, contents, () => run === reconnectRun).catch(error => log('reconnect', service.name, error.message)); }
   });
   contents.on('did-navigate-in-page', (_, url, isMainFrame) => { if (isMainFrame !== false && isSignInUrl(url)) setTimeout(() => watchSignIn(service, contents), 600); });
   contents.on('did-navigate-in-page', () => update());
@@ -395,8 +422,18 @@ function trackState(view, service) {
   update();
 }
 
-async function createServiceView(service, key = service.id, url = service.url) {
-  if (views.has(key) && !views.get(key).webContents.isDestroyed()) return views.get(key);
+// Opening a service and the overview reading its mail used to ask at the same
+// moment: both found no page yet and each made one, so a second, hidden Gmail
+// ran next to the one on screen (twice the memory, two Streak sign-ins racing).
+const creatingViews = new Map(); // key → the page being made
+const madeViews = []; // tests: every page made, by key
+function createServiceView(service, key = service.id, url = service.url) {
+  if (views.has(key) && !views.get(key).webContents.isDestroyed()) return Promise.resolve(views.get(key));
+  if (!creatingViews.has(key)) creatingViews.set(key, makeServiceView(service, key, url).finally(() => creatingViews.delete(key)));
+  return creatingViews.get(key);
+}
+async function makeServiceView(service, key, url) {
+  madeViews.push(key);
   const serviceSession = prepareSession(service.id);
   await restoreSessionCookies(service.id);
   await loadExtensionsFor(serviceSession, service);
@@ -443,11 +480,12 @@ function retryFailedLoads(view, service, firstUrl) {
 let lastServiceId = null; // the last service shown, for menus opened from elsewhere
 async function activate(service, { key = service.id, url } = {}) {
   lastServiceId = service.id;
-  const previous = views.get(activeKey);
+  const ticket = ++activation;
   const view = await createServiceView(service, key, url || service.url);
   failedLoads.get(view.webContents.id)?.(); // opened while its page had failed: try again now
   if (url && views.get(key) === view && view.webContents.getURL() && view.webContents.getURL() !== url) await view.webContents.loadURL(url).catch(() => {});
-  if (previous && previous !== view) detach(previous);
+  // Opening takes a moment (cookies, extensions): if you went elsewhere meanwhile, stay there.
+  if (ticket !== activation) return false;
   activeKey = key;
   showActive();
   if (overlayDepth === 0) view.webContents.focus();
@@ -535,6 +573,8 @@ function signInCredentials(serviceId) {
 
 const signInState = new Map();
 const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
+// The page, without the query: enough to see which sign-in step it is (/signin/oauth/id).
+const pathOf = url => { try { return new URL(url).pathname.slice(0, 60); } catch { return ''; } };
 // A sign-in page by its address, or (for a service with a saved sign-in) by its form.
 async function onSignInPage(service, contents) {
   if (contents.isDestroyed()) return false;
@@ -551,7 +591,7 @@ async function watchSignIn(service, contents, stateKey = service.id) {
   if (!(await onSignInPage(service, contents))) {
     if (state.inFlow) log('sign-in', service.name, state.auto ? 'signed back in automatically' : 'left the sign-in page', hostOf(url));
     if (state.inFlow && state.auto) addNotification({ title: service.name, body: 'Signed back in automatically.', type: 'success', serviceId: service.id });
-    Object.assign(state, { inFlow: false, auto: false, signedIn: true, inFlowLogged: false });
+    Object.assign(state, { inFlow: false, auto: false, signedIn: true, inFlowLogged: false, looks: 0, lastLogged: '' });
     state.passwords.splice(0);
     return;
   }
@@ -574,6 +614,7 @@ async function watchSignIn(service, contents, stateKey = service.id) {
     if (Date.now() - state.failedAt > 2 * 3600000) {
       state.failedAt = Date.now();
       log('sign-in', service.name, hostOf(url), 'saved password refused, stopped');
+      revealWindow.get(contents)?.();
       addNotification({ title: service.name, body: `Nuvia could not sign in automatically: the saved password for ${credentials.username} was not accepted. Open the service and sign in once by hand to update it.`, type: 'warning', serviceId: service.id });
     }
     return;
@@ -586,12 +627,24 @@ async function watchSignIn(service, contents, stateKey = service.id) {
   let action;
   try {
     await sleep(900);
-    action = await run(contents, `(${fillSignIn.toString()})(${JSON.stringify(credentials.username)}, ${JSON.stringify(credentials.password)})`, 5000, 'none');
+    // A reconnection window may confirm "Continue" to an app already connected once (Streak).
+    const options = { confirmApp: windowProgress.has(contents) };
+    action = await run(contents, `(${fillSignIn.toString()})(${JSON.stringify(credentials.username)}, ${JSON.stringify(credentials.password)}, ${JSON.stringify(options)})`, 5000, 'none');
   } finally { state.busy = false; }
   if (state.again) { state.again = false; if (action === 'none') setTimeout(() => { if (!contents.isDestroyed()) watchSignIn(service, contents, stateKey); }, 600); }
   // Which site and which step, never what was typed: enough to see where a sign-in stops.
-  log('sign-in', service.name + (stateKey === service.id ? '' : ' (window)'), hostOf(url), action);
-  if (action !== 'none') state.auto = true;
+  const step = [hostOf(url), stateKey === service.id ? '' : pathOf(url), action].filter(Boolean).join(' ');
+  if (action !== 'none' || step !== state.lastLogged) log('sign-in', service.name + (stateKey === service.id ? '' : ' (window)'), step);
+  state.lastLogged = step;
+  if (action !== 'none') { state.auto = true; windowProgress.has(contents) && windowProgress.set(contents, Date.now()); }
+  if (action === 'none') {
+    // Nothing to do yet is not an attempt. Google draws its account choice
+    // after the page has loaded, with no event to wait for: a sign-in window
+    // looks again every 1.5 s for a minute.
+    state.attempts.pop();
+    if (stateKey !== service.id && (state.looks = (state.looks || 0) + 1) <= 40) setTimeout(async () => { if (await onSignInPage(service, contents)) watchSignIn(service, contents, stateKey); }, 1500);
+  }
+  if (action === 'mfa') revealWindow.get(contents)?.();
   if (action === 'password') state.passwords.push(Date.now());
   // Multi-step pages (email, then password) change without a reload: look again.
   if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(async () => { if (await onSignInPage(service, contents)) watchSignIn(service, contents, stateKey); }, 2500);
@@ -1999,7 +2052,7 @@ ipcMain.handle('chat:open-claude', event => {
 });
 
 if (TEST) {
-  handle('debug:state', () => ({ activeKey, overlayDepth, attached: Boolean(views.get(activeKey) && attached(views.get(activeKey))), views: [...views.keys()], hostBounds, uiExtensions: session.defaultSession.extensions.getAllExtensions().length }));
+  handle('debug:state', () => ({ activeKey, overlayDepth, children: mainWindow.contentView.children.length, made: Object.fromEntries([...new Set(madeViews)].map(key => [key, madeViews.filter(item => item === key).length])), attached: Boolean(views.get(activeKey) && attached(views.get(activeKey))), views: [...views.keys()], hostBounds, uiExtensions: session.defaultSession.extensions.getAllExtensions().length }));
   handle('debug:menu', () => (lastMenu ? lastMenu.items.filter(item => item.label).map(item => ({ label: item.label, enabled: item.enabled })) : null));
   handle('debug:menu-click', label => { const item = lastMenu?.items.find(entry => entry.label === label); if (!item) return false; item.click(); return true; });
   handle('debug:menu-clear', () => { lastMenu = null; });

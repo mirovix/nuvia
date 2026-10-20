@@ -15,4 +15,20 @@
     else document.getElementById('err').textContent = "Couldn't find your Google Account";
   });
 </script>
+<script>
+  // Signing in to an app with Google (Streak): the account choice is drawn a
+  // while after the page loads, then "Sign in to Streak" asks to continue.
+  if (location.pathname.startsWith('/o/oauth2')) {
+    document.title = 'Sign in - Google Accounts';
+    document.body.innerHTML = '<p>Loading…</p>';
+    setTimeout(() => {
+      document.body.innerHTML = '<h1>Choose an account</h1><p>to continue to Streak</p><div role="link" data-identifier="mario.rossi@studenti.unipd.it" id="acct">Mario Rossi</div>';
+      document.getElementById('acct').addEventListener('click', () => {
+        history.pushState({}, '', '/signin/oauth/id?app=streak');
+        document.body.innerHTML = '<h1>Sign in to Streak</h1><p>Google will share your name and email with Streak.</p><button id="cancel">Cancel</button> <button id="go">Continue</button>';
+        document.getElementById('go').addEventListener('click', () => { location.href = 'https://www.streak.com/done'; });
+      });
+    }, 4000);
+  }
+</script>
 </body></html>

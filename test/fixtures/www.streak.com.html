@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Streak</title></head>
+<body>
+<!-- Streak's sign-in window: /login goes to Google, /done tells Gmail it is connected. -->
+<script>
+  if (location.pathname === '/login') location.href = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=streak';
+  if (location.pathname === '/done') { window.opener?.postMessage('streak-connected', '*'); setTimeout(() => window.close(), 300); }
+</script>
+</body></html>

@@ -16,7 +16,7 @@ import { readInfo, defaultRules } from './lib/extensions.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
-import { fillSignIn, fullUsername, isSignInUrl } from './lib/autologin.js';
+import { fillSignIn, fullUsername, isSignInUrl, looksLikeSignInForm } from './lib/autologin.js';
 import { createTileSource, parseTileUrl } from './lib/tiles.js';
 import { createTrafficSource, trafficLevel } from './lib/traffic.js';
 import { CHECK_EVERY_MS, checkRelease, installKind, installPaths, isNewer, parseSums } from './lib/updater.js';
@@ -417,12 +417,20 @@ function signInCredentials(serviceId) {
 
 const signInState = new Map();
 const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
+// A sign-in page by its address, or (for a service with a saved sign-in) by its form.
+async function onSignInPage(service, contents) {
+  if (contents.isDestroyed()) return false;
+  if (isSignInUrl(contents.getURL())) return true;
+  if (!signInCredentials(service.id)) return false;
+  return Boolean(await run(contents, `(${looksLikeSignInForm.toString()})()`, 3000, false));
+}
+
 async function watchSignIn(service, contents) {
   if (contents.isDestroyed()) return;
   const url = contents.getURL();
   const state = signInState.get(service.id) || { attempts: [], passwords: [], inFlow: false, noticeAt: 0, mfaAt: 0, failedAt: 0, signedIn: false };
   signInState.set(service.id, state);
-  if (!isSignInUrl(url)) {
+  if (!(await onSignInPage(service, contents))) {
     if (state.inFlow) log('sign-in', service.name, state.auto ? 'signed back in automatically' : 'left the sign-in page', hostOf(url));
     if (state.inFlow && state.auto) addNotification({ title: service.name, body: 'Signed back in automatically.', type: 'success', serviceId: service.id });
     Object.assign(state, { inFlow: false, auto: false, signedIn: true, inFlowLogged: false });
@@ -468,7 +476,7 @@ async function watchSignIn(service, contents) {
   if (action !== 'none') state.auto = true;
   if (action === 'password') state.passwords.push(Date.now());
   // Multi-step pages (email, then password) change without a reload: look again.
-  if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(() => { if (!contents.isDestroyed() && isSignInUrl(contents.getURL())) watchSignIn(service, contents); }, 2500);
+  if (['account', 'username', 'password', 'continue'].includes(action)) setTimeout(async () => { if (await onSignInPage(service, contents)) watchSignIn(service, contents); }, 2500);
   if (action === 'mfa' && Date.now() - state.mfaAt > 30 * 60000) {
     state.mfaAt = Date.now();
     addNotification({ title: service.name, body: 'Sign-in needs your second factor (code or approval). Open the service to finish.', type: 'warning', serviceId: service.id });
@@ -979,7 +987,7 @@ handle('services:signin-set', (id, { username, password } = {}) => {
   writeFileSync(signInFile(id), safeStorage.encryptString(JSON.stringify({ username: String(username).trim(), password: String(password) })), { mode: 0o600 });
   signInState.get(id)?.passwords.splice(0);
   const contents = views.get(id)?.webContents;
-  if (contents && isSignInUrl(contents.getURL())) watchSignIn(serviceById(id), contents);
+  if (contents) onSignInPage(serviceById(id), contents).then(yes => { if (yes) watchSignIn(serviceById(id), contents); });
   return { saved: true, username: String(username).trim() };
 });
 handle('services:signin-clear', id => { rmSync(signInFile(id), { force: true }); return { saved: false }; });

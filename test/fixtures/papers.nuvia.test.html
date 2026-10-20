@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Log in</title></head>
+<body>
+<!-- Like PaperCept (ras.papercept.net): the submit button is 0 px wide, and the
+     "Log in" link runs javascript:command('Login'), which marks the form and
+     submits it. An expired session shows the same form on start.pl. -->
+<div id="app"></div>
+<script>
+  const app = document.getElementById('app');
+  const signedIn = localStorage.getItem('session') === 'ok';
+  function command(arg) {
+    const form = document.forms[0];
+    form.Command.checked = true; form.Command.value = arg + '.x';
+    form.requestSubmit(); // the real page calls form.submit() and the server reads Command
+  }
+  if (signedIn && !location.pathname.endsWith('login.pl')) {
+    app.innerHTML = '<h1>RAS conference home</h1><p>Welcome back</p>';
+  } else {
+    app.innerHTML = '<form method="POST" name="login" action="/conferences/scripts/login.pl">'
+      + '<input type="checkbox" name="Command" value="ON" style="display:none">'
+      + '<input id="pin" type="text" name="LoginId" placeholder="--PIN, Login alias, Email or ORCID--">'
+      + '<input type="password" name="Password" placeholder="--Password--">'
+      + '<input name="Submit" type="submit" value="Submit" style="width:0px;height:0px;border:0px">'
+      + '<input type="hidden" name="LoginPage" value="ON"></form>'
+      + '<p><a href="javascript:command(\'Home\')">Home</a> <a href="javascript:command(\'Login\');" title="Click to log in">Log in</a></p><p id="err"></p>';
+    document.forms[0].addEventListener('submit', event => {
+      event.preventDefault();
+      const form = event.target;
+      const ok = form.LoginId.value === '12345' && form.Password.value === 'Conf-pass-1' && form.Command.checked && form.Command.value === 'Login.x';
+      if (ok) { localStorage.setItem('session', 'ok'); location.href = 'https://papers.nuvia.test/conferences/scripts/start.pl'; }
+      else document.getElementById('err').textContent = 'Login failed: ' + (form.Command.checked ? form.Command.value : 'no command');
+    });
+  }
+</script>
+</body></html>

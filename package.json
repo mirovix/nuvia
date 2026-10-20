@@ -1,6 +1,6 @@
 {
   "name": "nuvia-desktop",
-  "version": "0.6.15",
+  "version": "0.6.16",
   "private": true,
   "description": "Tutti i tuoi servizi web in una finestra, con sessioni persistenti. Windows, macOS e Linux.",
   "author": {
@@ -19,13 +19,14 @@
     "test:teams": "node --test --test-concurrency=1 test/teams.test.js",
     "test:teams:live": "node --test --test-concurrency=1 test/teams-live.test.js",
     "test:signin": "node --test --test-concurrency=1 test/signin-unipd.test.js",
-    "test:all": "npm test && npm run test:ui && npm run test:signin && npm run test:integration && npm run test:teams && npm run test:retry",
+    "test:all": "npm test && npm run test:ui && npm run test:signin && npm run test:integration && npm run test:teams && npm run test:retry && npm run test:papercept",
     "icons": "node scripts/build-icons.mjs",
     "pack": "electron-builder --publish never",
     "pack:linux": "electron-builder --linux --publish never",
     "pack:win": "electron-builder --win --publish never",
     "pack:mac": "electron-builder --mac --publish never",
-    "test:retry": "node --test --test-concurrency=1 test/retry.test.js"
+    "test:retry": "node --test --test-concurrency=1 test/retry.test.js",
+    "test:papercept": "node --test --test-concurrency=1 test/papercept.test.js"
   },
   "devDependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",

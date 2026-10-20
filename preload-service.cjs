@@ -4,9 +4,12 @@
 // isolated world: the page cannot see or call it.
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Kept in step with lib/autologin.js (SIGN_IN_HOSTS, SIGN_IN_PATHS).
 const SIGN_IN_HOSTS = /(^|\.)(accounts\.google\.com|login\.microsoftonline\.com|login\.live\.com|login\.microsoft\.com)$|(^|\.)(idp|sso|shibidp|shibboleth|login|auth|cas)[.-]/i;
 
-if (SIGN_IN_HOSTS.test(location.hostname)) {
+const SIGN_IN_PATHS = /(^|[/_.-])(log-?in|sign-?in|sign_in|logon|auth|sso|cas)([/_.-]|$)/i;
+
+if (SIGN_IN_HOSTS.test(location.hostname) || SIGN_IN_PATHS.test(location.pathname)) {
   // Sign in with the password, not "face, fingerprint, PIN or security key": with
   // no passkey support on the page, Microsoft and Google ask for the password,
   // which Nuvia can fill in again when the session expires.

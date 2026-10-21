@@ -12,6 +12,9 @@
   document.querySelectorAll('#pane-side [role="listitem"]').forEach(row => row.querySelector('[role="gridcell"]').addEventListener('click', () => {
     const main = document.querySelector('#main'); main.hidden = false;
     main.querySelector('header').textContent = row.innerText.split('\n')[0];
+    // The open conversation, marked up like WhatsApp Web: incoming and outgoing bubbles.
+    main.querySelector('#log').innerHTML = [['in', '14:00, 21/10/2026', 'Mum', 'Are you coming for dinner tonight?'], ['out', '14:01, 21/10/2026', 'Me', 'Probably yes'], ['in', '14:02, 21/10/2026', 'Mum', 'Remember the bread']]
+      .map(([way, time, from, text]) => `<div role="row" class="message-${way}"><div class="copyable-text" data-pre-plain-text="[${time}] ${from}: "><span class="selectable-text">${text}</span></div></div>`).join('');
   }));
   document.querySelector('footer button').addEventListener('click', () => {
     const box = document.querySelector('footer [contenteditable]');

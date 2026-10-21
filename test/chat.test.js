@@ -15,7 +15,8 @@ test('right click menu, Ask Claude on a selection, Reply with Claude in Gmail', 
       cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
       process.env.NUVIA_FIXTURES = fixtures;
       process.env.FAKE_CLAUDE_LOG = join(profile, 'claude.log');
-      writeProfile(profile, { 'services.json': [{ id: 'gmail', name: 'Gmail Test', url: 'https://mail.google.com/mail/u/0/#inbox' }], 'preferences.json': { chatLanguage: 'Italian', name: 'Miro' } });
+      // A Gmail with a frame that never loads: page scripts must still run.
+      writeProfile(profile, { 'services.json': [{ id: 'gmail', name: 'Gmail Test', url: 'https://mail.google.com/mail/u/0/?frame=hang#inbox' }], 'preferences.json': { chatLanguage: 'Italian', name: 'Miro' } });
     },
     env: { NUVIA_CLAUDE_BIN: join(project, 'test', 'fixtures', 'fake-claude.mjs') }
   });
@@ -148,5 +149,50 @@ test('with ChatGPT chosen, Ask and Reply are answered by Codex', { timeout: 1200
     throw new Error(`${error.message}\n--- Nuvia log ---\n${nuviaLog().slice(-2000)}\n--- Electron log ---\n${app.output().slice(-2000)}`);
   } finally {
     ask?.close(); gmail?.close(); ui?.close(); await app.close();
+  }
+});
+
+// Reply with Claude in a chat app: Claude reads the open conversation (who wrote
+// what, and which messages are the user's) and the draft goes into the message
+// box, not sent.
+test('Reply with Claude in WhatsApp: the draft goes into the message box, unsent', { timeout: 120000 }, async () => {
+  const app = await launch({
+    prepare: profile => {
+      const fixtures = join(profile, 'fixtures');
+      cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
+      process.env.NUVIA_FIXTURES = fixtures;
+      process.env.FAKE_CLAUDE_LOG = join(profile, 'claude.log');
+      writeProfile(profile, { 'services.json': [{ id: 'wa', name: 'WhatsApp', url: 'https://web.whatsapp.com/' }], 'preferences.json': { chatLanguage: 'Italian', name: 'Miro' } });
+    },
+    env: { NUVIA_CLAUDE_BIN: join(project, 'test', 'fixtures', 'fake-claude.mjs') }
+  });
+  const nuviaLog = () => { try { return readFileSync(join(app.profile, 'nuvia.log'), 'utf8'); } catch { return ''; } };
+  const claudeSaw = () => { try { return readFileSync(join(app.profile, 'claude.log'), 'utf8').trim().split('\n').map(line => JSON.parse(line)); } catch { return []; } };
+  let ui; let wa; let reply;
+  try {
+    ui = await app.ui();
+    await ui.eval(`document.querySelector('.service[data-id="wa"]').click(); return true`);
+    wa = await app.page(target => target.type === 'page' && target.url.startsWith('https://web.whatsapp.com'), 30000);
+    await wa.waitFor(`document.querySelector('#pane-side [role="gridcell"]')`);
+    await wa.eval(`document.querySelector('#pane-side [role="gridcell"]').click(); return true`);
+    await wa.waitFor(`document.querySelectorAll('#main [data-pre-plain-text]').length === 3`);
+    await ui.waitFor(`!document.getElementById('reply-claude').hidden`, { timeout: 10000 });
+    await ui.eval(`document.getElementById('reply-claude').click(); return true`);
+    reply = await app.page(target => target.type === 'page' && target.url.endsWith('chat.html'), 15000);
+    await reply.waitFor(`document.querySelector('.chat-draft-actions .btn.accent')`, { timeout: 20000 });
+    assert.equal(await reply.eval(`return document.querySelector('.chat-draft-text').textContent`), 'Sì, vengo a cena e porto il pane!');
+    assert.match(await reply.eval(`return document.querySelector('.chat-draft-actions .btn.accent').textContent`), /Put in the chat/);
+    const prompt = claudeSaw().filter(line => line.user).at(-1).user;
+    assert.match(prompt, /^Chat: Mum \(WhatsApp\)/);
+    assert.match(prompt, /\[Mum\] 14:00, 21\/10\/2026\nAre you coming for dinner tonight\?\n\n\[me\] 14:01, 21\/10\/2026\nProbably yes\n\n\[Mum\] 14:02, 21\/10\/2026\nRemember the bread/);
+    assert.match(claudeSaw().filter(line => line.argv).at(-1).system, /answer a chat/);
+    await reply.eval(`document.querySelector('.chat-draft-actions .btn.accent').click(); return true`);
+    await reply.waitFor(`document.querySelector('.chat-draft-actions .btn.accent').textContent.includes('Inserted')`, { timeout: 15000 });
+    assert.equal(await wa.eval(`return document.querySelector('#main footer [contenteditable]').innerText.trim()`), 'Sì, vengo a cena e porto il pane!');
+    assert.equal(await wa.eval('return window.sent.length'), 0, 'put in the box, not sent');
+  } catch (error) {
+    throw new Error(`${error.message}\n--- Nuvia log ---\n${nuviaLog().slice(-2000)}\n--- Electron log ---\n${app.output().slice(-2500)}`);
+  } finally {
+    reply?.close(); wa?.close(); ui?.close(); await app.close();
   }
 });

@@ -6,6 +6,7 @@ function markNav() {
   $$('#nav .nav-item').forEach(item => item.classList.toggle('active', state.route === item.dataset.route));
   $$('#service-list .service').forEach(item => item.classList.toggle('active', state.route === 'service' && item.dataset.id === state.serviceId));
   $('#customize').hidden = state.route !== 'home';
+  document.body.dataset.page = state.route;
 }
 
 export function renderTopbar() {

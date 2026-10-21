@@ -16,4 +16,7 @@
 <input id="search" value="search text" style="width:200px">
 </div>
 <script>addEventListener('hashchange', () => { document.body.dataset.opened = location.hash; });</script>
+<!-- ?frame=hang: like a frame in a real Gmail that never finishes loading while the page loads, so
+     Electron's isLoadingMainFrame() stays true and webContents.executeJavaScript waits for ever. -->
+<script>if (/frame=hang/.test(location.search)) { const frame = document.createElement('iframe'); frame.src = 'https://hang.nuvia.test/stream'; frame.style.display = 'none'; document.body.append(frame); }</script>
 </body></html>

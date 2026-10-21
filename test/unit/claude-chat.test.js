@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, startChat, startCodexChat, forgetCodexLimits, codexLockdownArgs } from '../../lib/claude-chat.js';
+import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, forgetCodexLimits, codexLockdownArgs } from '../../lib/claude-chat.js';
 
 const fake = resolve(import.meta.dirname, '..', 'fixtures', 'fake-claude.mjs');
 
@@ -180,4 +180,13 @@ test('ChatGPT with the web: its "I will search" commentary is not the answer', a
   assert.equal(events.at(-1).type, 'done');
   assert.match(events.at(-1).text, /^\*\*Fotosintesi\*\*/);
   assert.doesNotMatch(events.filter(event => event.type === 'delta').map(event => event.text).join(''), /Cerco/);
+});
+
+test('a chat reply sees who wrote each message, the user\'s own marked [me]', () => {
+  const prompt = messagePrompt({ title: 'Lab group', app: 'Telegram', messages: [{ from: 'Marco', time: '10:02', text: 'Meeting at 3?' }, { from: 'Miro', mine: true, text: 'ok' }, { from: '', text: 'And the slides?' }, { from: 'Anna', text: '' }] });
+  assert.equal(prompt, 'Chat: Lab group (Telegram)\n\n[Marco] 10:02\nMeeting at 3?\n\n[me]\nok\n\n[them]\nAnd the slides?\n\nHelp me reply to this chat.');
+  const system = messageSystem({ language: 'Italian', name: 'Miro' });
+  assert.match(system, /<reply>/);
+  assert.match(system, /language of the conversation/);
+  assert.match(system, /The user is Miro/);
 });

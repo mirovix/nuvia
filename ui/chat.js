@@ -35,17 +35,17 @@ function markdown(source) {
 
 function draftCard(reply, done) {
   return h('div.chat-draft',
-    h('div.chat-draft-head', icon('mail'), h('span', 'Reply draft')),
+    h('div.chat-draft-head', icon(meta.mode === 'message' ? 'message-circle' : 'mail'), h('span', meta.mode === 'message' ? 'Message draft' : 'Reply draft')),
     h('div.chat-draft-text', reply),
     done ? h('div.chat-draft-actions',
-      meta.canInsert ? h('button.btn.sm.accent', { type: 'button', on: { click: event => insert(reply, event.currentTarget) } }, icon('reply'), 'Insert into reply') : null,
+      meta.canInsert ? h('button.btn.sm.accent', { type: 'button', on: { click: event => insert(reply, event.currentTarget) } }, icon('reply'), meta.mode === 'message' ? 'Put in the chat' : 'Insert into reply') : null,
       h('button.btn.sm', { type: 'button', on: { click: event => copy(reply, event.currentTarget) } }, icon('copy'), 'Copy')) : null);
 }
 
 // An answer: Markdown around the reply draft, which Claude puts between <reply> tags.
 function renderAnswer(el, source, done, status = '') {
   const shown = done ? source : source.replace(/<\/?[a-z]*$/i, '');
-  const parts = meta.mode === 'mail' ? shown.split(/(<reply>[\s\S]*?(?:<\/reply>|$))/) : [shown];
+  const parts = meta.mode === 'mail' || meta.mode === 'message' ? shown.split(/(<reply>[\s\S]*?(?:<\/reply>|$))/) : [shown];
   fill(el, ...parts.filter(part => part.trim()).map(part => {
     const reply = part.match(/^<reply>([\s\S]*?)(<\/reply>)?$/);
     if (reply) return draftCard(reply[1].trim(), done || Boolean(reply[2]));
@@ -133,10 +133,11 @@ document.body.dataset.mode = meta.mode;
 $('#chat-title').textContent = meta.title || 'Claude';
 $('#chat-sub').textContent = meta.sub || '';
 if (meta.quote) { const quote = $('#chat-context'); quote.textContent = meta.quote; quote.hidden = false; }
-text.placeholder = meta.mode === 'mail' ? 'Answer Claude, or say what to change…' : 'Ask a follow-up…';
-if (meta.mode === 'mail') {
+text.placeholder = meta.mode === 'ask' ? 'Ask a follow-up…' : `Answer ${meta.provider || 'Claude'}, or say what to change…`;
+if (meta.mode === 'mail' || meta.mode === 'message') {
   const chips = $('#chat-chips');
-  fill(chips, ...['Write it now', 'Shorter', 'More formal', 'In English', 'In Italian'].map(label => h('button.chip', { type: 'button', on: { click: () => send(label === 'Write it now' ? 'Write the reply now with what you have.' : `${label}, please.`) } }, label)));
+  const labels = meta.mode === 'mail' ? ['Write it now', 'Shorter', 'More formal', 'In English', 'In Italian'] : ['Shorter', 'Warmer', 'More formal', 'In English', 'In Italian'];
+  fill(chips, ...labels.map(label => h('button.chip', { type: 'button', on: { click: () => send(label === 'Write it now' ? 'Write the reply now with what you have.' : `${label}, please.`) } }, label)));
   chips.hidden = false;
 }
 if (meta.error) {

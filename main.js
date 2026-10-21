@@ -14,7 +14,7 @@ import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-status
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
 import { readInfo, defaultRules, extensionHosts, hostAllowed, contentScriptsRunOn } from './lib/extensions.js';
 import { prepareExtension } from './lib/extension-shim.js';
-import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, startChat, startCodexChat } from './lib/claude-chat.js';
+import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat } from './lib/claude-chat.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
@@ -213,6 +213,7 @@ function serveFixtures(serviceSession) {
     // A network that is not up yet: the first two loads of this host fail.
     if (url.hostname === 'flaky.nuvia.test' && fixtureFailures++ < 2) return Response.error();
     // A frame that never finishes loading (an extension's, say).
+    if (url.hostname === 'hang.nuvia.test' && url.pathname === '/stream') return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('<!doctype html><p>')); } }), { headers: { 'content-type': 'text/html' } });
     if (url.hostname === 'hang.nuvia.test') return new Promise(() => {});
     // Like Google's calendar export for some accounts: it works from a page of
     // the site, and fails as net::ERR_FAILED from Nuvia's main process.
@@ -566,7 +567,11 @@ async function withHiddenPage(serviceId, url, task, { settle = 2500, timeout = 2
 
 async function run(contents, code, ms = 8000, fallback = null) {
   if (!contents || contents.isDestroyed() || contents.isCrashed()) return fallback;
-  try { return await withTimeout(contents.executeJavaScript(code, true), ms, fallback); } catch (error) { log('script', error.message); return fallback; }
+  // webContents.executeJavaScript first waits for isLoadingMainFrame() to turn
+  // false, which never happens while any frame keeps loading (an extension's,
+  // in Gmail): every read timed out. The page's own frame runs it at once.
+  const frame = contents.getURL() ? contents.mainFrame : null;
+  try { return await withTimeout(frame ? frame.executeJavaScript(code, true) : contents.executeJavaScript(code, true), ms, fallback); } catch (error) { log('script', error.message); return fallback; }
 }
 
 function waitForLoad(contents, ms = 12000) {
@@ -1962,7 +1967,7 @@ function contextMenu(contents, params, service, { ask = true } = {}) {
     { label: 'Add to dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(misspelledWord) }
   ]);
   if (selection && ask) section([{ label: `Ask ${providerName()} about “${shortText(selection)}”`, click: () => openAskChat(contents, selection) }]);
-  if (service && serviceGroup(service) === 'mail' && !isEditable) section([{ label: `Reply with ${providerName()}`, click: () => openMailChat(service.id).then(result => { if (!result.opened) notifyRenderer('toast', result.reason); }) }]);
+  if (service && ['mail', 'message'].includes(serviceGroup(service)) && !isEditable) section([{ label: `Reply with ${providerName()}`, click: () => openReplyChat(service.id).then(result => { if (!result.opened) notifyRenderer('toast', result.reason); }) }]);
   if (/^https?:/i.test(linkURL)) section([
     { label: 'Open link in browser', click: () => openOutside(linkURL) },
     { label: 'Copy link address', click: () => clipboard.writeText(linkURL) }
@@ -2057,17 +2062,42 @@ function openAskChat(contents, selection) {
 async function openMailChat(serviceId) {
   const service = serviceById(serviceId);
   const contents = views.get(serviceId)?.webContents;
-  if (!service || serviceGroup(service) !== 'mail') return { opened: false, reason: `Reply with ${providerName()} works in Gmail and Outlook.` };
+  if (!service || serviceGroup(service) !== 'mail') return { opened: false, reason: `Reply with ${providerName()} works in Gmail, Outlook and chat apps.` };
   if (!contents || contents.isDestroyed()) return { opened: false, reason: `Open ${service.name} and an email first.` };
   const mail = await run(contents, script(pageScripts.mailThread, serviceKind(service)), 6000, null);
-  if (!mail?.ok) return { opened: false, reason: mail?.reason || 'Nuvia could not read the email: open it and try again.' };
+  if (!mail?.ok) {
+    log('reply with claude', service.name, 'could not read the email', mail?.reason || 'the page did not answer');
+    return { opened: false, reason: mail?.reason || 'Nuvia could not read the email: open it and try again.' };
+  }
   const last = mail.messages.at(-1);
   openChat({ mode: 'mail', serviceId, title: `Reply with ${providerName()}`, sub: mail.subject || service.name,
     quote: last?.from ? `${last.from}${mail.messages.length > 1 ? ` · ${mail.messages.length} messages` : ''}${mail.subject ? ` — ${mail.subject}` : ''}` : mail.subject,
     system: mailSystem({ language: chatLanguage(), name: preferences().name }), prompt: mailPrompt(mail) });
   return { opened: true };
 }
-handle('chat:mail-reply', serviceId => openMailChat(serviceId || activeKey?.split('#')[0] || lastServiceId));
+const CHAT_APPS = { whatsapp: 'WhatsApp', telegram: 'Telegram', teams: 'Microsoft Teams', mattermost: 'Mattermost', slack: 'Slack' };
+async function openMessageChat(serviceId) {
+  const service = serviceById(serviceId);
+  const contents = views.get(serviceId)?.webContents;
+  if (!contents || contents.isDestroyed()) return { opened: false, reason: `Open ${service.name} and a chat first.` };
+  const thread = await run(contents, script(pageScripts.chatThread, serviceKind(service)), 6000, null);
+  if (!thread?.ok) {
+    log('reply with claude', service.name, 'could not read the chat', thread?.reason || 'the page did not answer');
+    return { opened: false, reason: thread?.reason || 'Nuvia could not read the chat: open it and try again.' };
+  }
+  const last = thread.messages.filter(item => !item.mine).at(-1);
+  openChat({ mode: 'message', serviceId, title: `Reply with ${providerName()}`, sub: thread.title || service.name,
+    quote: `${thread.title || service.name}${last?.text ? ` — ${last.text.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`,
+    system: messageSystem({ language: chatLanguage(), name: preferences().name }), prompt: messagePrompt({ ...thread, app: CHAT_APPS[serviceKind(service)] || service.name }) });
+  return { opened: true };
+}
+// "Reply with …": an email in Gmail or Outlook, or a chat in WhatsApp, Telegram, Teams, Mattermost or Slack.
+function openReplyChat(serviceId) {
+  const service = serviceById(serviceId);
+  if (service && serviceGroup(service) === 'message') return openMessageChat(serviceId);
+  return openMailChat(serviceId);
+}
+handle('chat:mail-reply', serviceId => openReplyChat(serviceId || activeKey?.split('#')[0] || lastServiceId));
 
 const chatFor = event => chats.get(event.sender.id);
 // What Claude Code or Codex says when it fails, in words that say what to do.
@@ -2088,7 +2118,7 @@ ipcMain.handle('chat:start', event => {
   const chat = chatFor(event);
   if (!chat) return { error: 'This chat has ended.' };
   const provider = chat.provider;
-  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: chat.mode === 'mail', provider: provider === 'codex' ? 'ChatGPT' : 'Claude', ...chatTheme() };
+  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: chat.mode === 'mail' || chat.mode === 'message', provider: provider === 'codex' ? 'ChatGPT' : 'Claude', ...chatTheme() };
   if (chat.conversation) return meta;
   const folder = fileInProfile('claude-chat');
   mkdirSync(folder, { recursive: true });
@@ -2122,10 +2152,11 @@ ipcMain.handle('chat:insert', async (event, text) => {
   const chat = chatFor(event);
   const service = chat && serviceById(chat.serviceId);
   const contents = chat && views.get(chat.serviceId)?.webContents;
-  if (!service || !contents || contents.isDestroyed()) return { ok: false, reason: 'The mailbox is closed: use Copy.' };
-  // Typing needs the mailbox focused, not the chat window.
+  const message = chat?.mode === 'message';
+  if (!service || !contents || contents.isDestroyed()) return { ok: false, reason: `The ${message ? 'chat' : 'mailbox'} is closed: use Copy.` };
+  // Typing needs the page focused, not the chat window.
   mainWindow.focus(); contents.focus();
-  const result = await run(contents, script(pageScripts.insertMailReply, serviceKind(service), String(text || '')), 12000, null);
+  const result = await run(contents, script(message ? pageScripts.insertChatReply : pageScripts.insertMailReply, serviceKind(service), String(text || '')), 12000, null);
   if (!result?.ok) log('reply with claude', service.name, 'insert failed', result?.reason || 'the page did not answer');
   return result?.ok ? result : { ok: false, reason: result?.reason || 'The reply box could not be filled: use Copy and paste it.' };
 });

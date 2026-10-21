@@ -600,6 +600,8 @@ dialog::backdrop { background: rgba(6, 6, 8, .45); backdrop-filter: blur(3px); a
 
 /* Toasts --------------------------------------------------------------- */
 .toast-stack { position: fixed; z-index: 1000; bottom: 20px; left: calc(var(--sidebar) + 50%); transform: translateX(calc(-50% - var(--sidebar) / 2)); display: grid; gap: 8px; justify-items: center; pointer-events: none; }
+/* An open service is a native view over the page area that covers anything drawn there: messages go in the top bar. */
+body[data-page="service"] .toast-stack { top: 10px; bottom: auto; }
 .toast { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--text); color: var(--bg); font-size: 13px; font-weight: 500; box-shadow: 0 20px 40px -12px rgba(0, 0, 0, .5); pointer-events: auto; animation: toast-in .25s var(--ease); max-width: 560px; }
 .toast button { padding: 5px 10px; border-radius: 8px; background: color-mix(in oklab, var(--bg) 14%, transparent); font-weight: 600; font-size: 12.5px; }
 .toast.leaving { animation: toast-out .2s forwards; }

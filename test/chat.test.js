@@ -67,7 +67,8 @@ test('right click menu, Ask Claude on a selection, Reply with Claude in Gmail', 
     assert.match(saw.find(line => line.user)?.user || '', /Selected text:\n"""\nphotosynthesis\n"""/);
     assert.ok(saw.some(line => line.user === 'E in inglese?'), 'the follow-up reached Claude');
     const argv = saw.find(line => line.argv).argv;
-    assert.equal(argv[argv.indexOf('--tools') + 1], '', 'no tools');
+    assert.equal(argv[argv.indexOf('--tools') + 1], 'WebSearch,WebFetch', 'Ask searches the web, and has no other tool');
+    assert.doesNotMatch(await ask.eval(`return document.querySelector('.chat-msg.assistant').innerText`), /Cerco sul web/, 'what it said before searching is gone');
     assert.match(saw.find(line => line.argv).system, /Answer in Italian/);
     await ask.eval('window.nuviaChat.close(); return true').catch(() => {});
     ask.close(); ask = null;
@@ -83,6 +84,8 @@ test('right click menu, Ask Claude on a selection, Reply with Claude in Gmail', 
     assert.match(first, /Subject: Meeting notes/);
     assert.match(first, /from Anna Rossi <anna@example\.com>, Tue 29 Sep 2026, 09:12\nHere are today's notes/);
     assert.match(saw.filter(line => line.argv).at(-1).system, /Sign it as Miro/);
+    const mailArgv = saw.filter(line => line.argv).at(-1).argv;
+    assert.equal(mailArgv[mailArgv.indexOf('--tools') + 1], '', 'Reply works on the email only: no tools, no web');
     // "Write it now": the draft, then into Gmail's reply box.
     await reply.eval(`[...document.querySelectorAll('.chat-chips button')].find(b => b.textContent === 'Write it now').click(); return true`);
     await reply.waitFor(`document.querySelector('.chat-draft-actions .btn.accent')`, { timeout: 20000 });
@@ -140,6 +143,7 @@ test('with ChatGPT chosen, Ask and Reply are answered by Codex', { timeout: 1200
     await ask.waitFor(`document.querySelector('.chat-msg.assistant')?.innerText.includes('ChatGPT')`, { timeout: 20000 });
     assert.equal(await ask.eval(`return document.getElementById('chat-title').textContent`), 'Ask ChatGPT');
     assert.match(await ask.eval(`return document.querySelector('.chat-msg.assistant').innerText`), /codex-work/, 'the account at its limit handed over');
+    assert.doesNotMatch(await ask.eval(`return document.querySelector('.chat-msg.assistant').innerText`), /Cerco sul web/, 'Codex\'s commentary is not the answer');
   } catch (error) {
     throw new Error(`${error.message}\n--- Nuvia log ---\n${nuviaLog().slice(-2000)}\n--- Electron log ---\n${app.output().slice(-2000)}`);
   } finally {

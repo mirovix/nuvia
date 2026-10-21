@@ -3,6 +3,7 @@
 // `claude -p --input-format stream-json --output-format stream-json`.
 // FAKE_CLAUDE_LOG: file that gets the arguments and every message received.
 // FAKE_CLAUDE_FAIL=auth: every answer fails as when Claude Code is signed out.
+// With the web tools on, "What is this?" first says it searches, then searches.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -25,6 +26,10 @@ createInterface({ input: process.stdin }).on('line', line => {
   record({ user: text });
   if (process.env.FAKE_CLAUDE_FAIL === 'auth') return out({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' });
   const reply = answer(text);
+  if (/What is this\?/.test(text) && argv[argv.indexOf('--tools') + 1] === 'WebSearch,WebFetch') {
+    out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Cerco sul web.' } } });
+    out({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', name: 'WebSearch', input: {} } } });
+  }
   for (const piece of reply.match(/[\s\S]{1,12}/g)) out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: piece } } });
   out({ type: 'assistant', message: { content: [{ type: 'text', text: reply }] } });
   out({ type: 'result', subtype: 'success', is_error: false, result: reply });

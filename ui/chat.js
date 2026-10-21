@@ -43,7 +43,7 @@ function draftCard(reply, done) {
 }
 
 // An answer: Markdown around the reply draft, which Claude puts between <reply> tags.
-function renderAnswer(el, source, done) {
+function renderAnswer(el, source, done, status = '') {
   const shown = done ? source : source.replace(/<\/?[a-z]*$/i, '');
   const parts = meta.mode === 'mail' ? shown.split(/(<reply>[\s\S]*?(?:<\/reply>|$))/) : [shown];
   fill(el, ...parts.filter(part => part.trim()).map(part => {
@@ -51,7 +51,7 @@ function renderAnswer(el, source, done) {
     if (reply) return draftCard(reply[1].trim(), done || Boolean(reply[2]));
     const div = h('div.chat-md'); div.innerHTML = markdown(part.trim()); return div;
   }));
-  if (!done && !source.trim()) fill(el, h('span.chat-typing', h('i'), h('i'), h('i')));
+  if (!done && !source.trim()) fill(el, h('span.chat-typing', h('i'), h('i'), h('i')), status ? h('span.chat-status', status) : null);
 }
 
 const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 40;
@@ -99,6 +99,12 @@ chat.onEvent(event => {
     current.text += event.text;
     renderAnswer(current.el, current.text, false);
     if (follow) log.scrollTop = log.scrollHeight;
+  } else if (event.type === 'status') {
+    // Searching the web: what was written before was a preamble.
+    if (!current) current = { el: addMessage('assistant', ''), text: '' };
+    if (event.clear) current.text = '';
+    current.status = event.text;
+    renderAnswer(current.el, current.text, false, event.text);
   } else if (event.type === 'done') {
     if (!current) current = { el: addMessage('assistant', ''), text: event.text };
     renderAnswer(current.el, current.text || event.text, true);

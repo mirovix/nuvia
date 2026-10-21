@@ -75,21 +75,23 @@ test('daily and monthly recurrences with UNTIL', () => {
   assert.equal(list.filter(event => event.uid === 'm').length, 3);
 });
 
-test('the same appointment in consecutive hours becomes one event', () => {
+test('the same appointment in consecutive hours or days, or copied, becomes one event', () => {
   const h = hour => Date.UTC(2026, 9, 20) + hour * 3600000;
   const event = (title, start, end, extra = {}) => ({ title, start: h(start), end: h(end), sourceId: 'uni', location: 'DEI', allDay: false, ...extra });
   const merged = mergeConsecutive([
     event('Robotica', 10, 11), event('Robotica', 9, 10), event('Lunch', 9.5, 10.5, { location: '' }), event('robotica ', 11.25, 12),
     event('Robotica', 15, 16), event('Robotica', 16, 17, { location: 'Aula B' }), event('Robotica', 16, 17, { sourceId: 'gmail' }),
-    event('Holiday', 0, 24, { allDay: true }), event('Holiday', 24, 48, { allDay: true })
+    event('Holiday', 0, 24, { allDay: true }), event('Holiday', 24, 48, { allDay: true }),
+    ...Array.from({ length: 3 }, () => event('Invito accettato', 48, 72, { allDay: true, location: '' })), event('Robotica', 48, 72, { allDay: true })
   ]);
-  assert.deepEqual(merged.map(item => [item.title, (item.start - h(0)) / 3600000, (item.end - h(0)) / 3600000, item.sourceId, item.location]), [
-    ['Holiday', 0, 24, 'uni', 'DEI'],
-    ['Robotica', 9, 12, 'uni', 'DEI'],
-    ['Lunch', 9.5, 10.5, 'uni', ''],
-    ['Robotica', 15, 16, 'uni', 'DEI'],
-    ['Robotica', 16, 17, 'uni', 'Aula B'],
-    ['Robotica', 16, 17, 'gmail', 'DEI'],
-    ['Holiday', 24, 48, 'uni', 'DEI']
+  assert.deepEqual(merged.map(item => [item.title, (item.start - h(0)) / 3600000, (item.end - h(0)) / 3600000, item.sourceId, item.location, item.copies || 1]), [
+    ['Holiday', 0, 48, 'uni', 'DEI', 1],
+    ['Robotica', 9, 12, 'uni', 'DEI', 1],
+    ['Lunch', 9.5, 10.5, 'uni', '', 1],
+    ['Robotica', 15, 16, 'uni', 'DEI', 1],
+    ['Robotica', 16, 17, 'uni', 'Aula B', 1],
+    ['Robotica', 16, 17, 'gmail', 'DEI', 1],
+    ['Invito accettato', 48, 72, 'uni', '', 3],
+    ['Robotica', 48, 72, 'uni', 'DEI', 1]
   ]);
 });

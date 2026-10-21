@@ -52,6 +52,22 @@ test('Claude runs with no tools, MCP servers or user settings', () => {
   assert.equal(after('--setting-sources'), '');
   assert.ok(args.includes('--strict-mcp-config') && args.includes('--no-session-persistence'));
   assert.equal(after('--system-prompt-file'), '/tmp/s.txt');
+  assert.ok(!args.includes('--allowedTools'));
+  // Ask: web search and fetch, nothing else.
+  const web = claudeArgs({ systemFile: '/tmp/s.txt', web: true });
+  assert.equal(web[web.indexOf('--tools') + 1], 'WebSearch,WebFetch');
+  assert.equal(web[web.indexOf('--allowedTools') + 1], 'WebSearch,WebFetch');
+  assert.equal(web[web.indexOf('--setting-sources') + 1], '');
+});
+
+test('a web search drops what Claude wrote before it, and says it is searching', async () => {
+  const events = await new Promise(done => {
+    const seen = [];
+    const chat = startChat({ command: process.execPath, args: [fake], system: 'test', web: true, cwd: tmpdir(), onEvent: event => { seen.push(event); if (event.type === 'done') { chat.stop(); done(seen); } } });
+    chat.send('Selected text: x\n\nWhat is this?');
+  });
+  assert.deepEqual(events.find(event => event.type === 'status'), { type: 'status', text: 'Searching the web…', clear: true });
+  assert.match(events.at(-1).text, /^La \*\*fotosintesi\*\*/);
 });
 
 test('prompts carry the selection and the email thread', () => {
@@ -147,4 +163,21 @@ test('ChatGPT: switching accounts mid-conversation brings the conversation along
 test('the lockdown follows the features this Codex has', () => {
   const args = codexLockdownArgs('shell_tool  stable  true\nnew_browser_thing  under development  true\nsqlite stable true\nview_image removed false\n');
   assert.deepEqual(args, ['--disable', 'shell_tool', '--disable', 'new_browser_thing', '-c', 'mcp_servers={}', '-c', 'web_search="disabled"']);
+  // Ask: live search, whose tool runs in the code-mode host (no file system); the shell stays off.
+  const features = 'shell_tool stable true\ncode_mode_host stable true\nskill_search stable true\n';
+  assert.deepEqual(codexLockdownArgs(features), ['--disable', 'shell_tool', '--disable', 'code_mode_host', '--disable', 'skill_search', '-c', 'mcp_servers={}', '-c', 'web_search="disabled"']);
+  assert.deepEqual(codexLockdownArgs(features, { web: true }), ['--disable', 'shell_tool', '--disable', 'skill_search', '-c', 'mcp_servers={}', '-c', 'web_search="live"']);
+});
+
+test('ChatGPT with the web: its "I will search" commentary is not the answer', async () => {
+  forgetCodexLimits();
+  const events = await new Promise(done => {
+    const seen = [];
+    const chat = startCodexChat({ command: { command: process.execPath, args: [fakeCodex] }, homes: [join(tmpdir(), '.codex-web')], system: 'Be brief.', web: true, cwd: tmpdir(), onEvent: event => { seen.push(event); if (event.type === 'done' || event.type === 'error') { chat.stop(); done(seen); } } });
+    chat.send('Selected text: x\n\nWhat is this?');
+  });
+  assert.ok(events.some(event => event.type === 'status' && event.text === 'Searching the web…'));
+  assert.equal(events.at(-1).type, 'done');
+  assert.match(events.at(-1).text, /^\*\*Fotosintesi\*\*/);
+  assert.doesNotMatch(events.filter(event => event.type === 'delta').map(event => event.text).join(''), /Cerco/);
 });

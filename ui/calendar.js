@@ -43,7 +43,7 @@ function eventRow(event) {
   return h(`button.event${past ? '.past' : ''}${current ? '.now' : ''}`, { type: 'button', style: `--c:${colorOf(event.sourceId)}`, title: event.source, on: { click: () => openEvent(event) } },
     h('span.when', event.allDay ? 'all day' : clock(event.start), !event.allDay ? h('small', clock(event.end)) : null),
     h('span.bar'),
-    h('span.what', h('strong', event.title), h('span', [event.location, event.source].filter(Boolean).join(' · '))));
+    h('span.what', h('strong', event.title, event.copies > 1 ? h('small.copies', ` ×${event.copies}`) : null), h('span', [event.location, event.source].filter(Boolean).join(' · '))));
 }
 
 function eventsOn(day) {

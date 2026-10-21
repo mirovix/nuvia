@@ -2034,7 +2034,7 @@ function openChat(options) {
 function openAskChat(contents, selection) {
   const host = hostOf(contents.getURL());
   openChat({ mode: 'ask', serviceId: null, title: `Ask ${providerName()}`, sub: host ? `From ${host}` : 'From Nuvia', quote: selection.slice(0, 400),
-    system: askSystem({ language: chatLanguage() }), prompt: askPrompt({ text: selection, title: contents.getTitle(), host }) });
+    system: askSystem({ language: chatLanguage() }), prompt: askPrompt({ text: selection, title: contents.getTitle(), host, language: chatLanguage() }) });
 }
 async function openMailChat(serviceId) {
   const service = serviceById(serviceId);
@@ -2079,6 +2079,8 @@ ipcMain.handle('chat:start', event => {
     if (value.type === 'error') { log(`${provider} chat`, chat.mode, value.message); value = { ...value, message: chatError(value.message, provider), fallback: true }; }
     send(value);
   };
+  // "Ask" may search the web; "Reply" works on an email only and stays offline.
+  const web = chat.mode === 'ask';
   if (provider === 'codex') {
     const command = process.env.NUVIA_CODEX_CHAT_BIN ? { command: process.env.NUVIA_CODEX_CHAT_BIN, args: [] } : findCodex({ home: homedir() });
     if (!command) return { ...meta, error: chatError('not installed', 'codex'), fallback: true };
@@ -2086,11 +2088,11 @@ ipcMain.handle('chat:start', event => {
     // Accounts the Claude & Codex page already knows are at their limit go last.
     const full = home => { const live = codexLive.get(home)?.value; return Boolean(live?.limitReached || live?.session?.percent >= 100 || live?.weekly?.percent >= 100); };
     const homes = codexHomes({ home: TEST ? undefined : homedir(), primary: CODEX_HOME, extra }).sort((a, b) => full(a) - full(b));
-    chat.conversation = startCodexChat({ command, homes, system: chat.system, cwd: folder, onEvent });
+    chat.conversation = startCodexChat({ command, homes, system: chat.system, web, cwd: folder, onEvent });
   } else {
     const command = process.env.NUVIA_CLAUDE_BIN || findClaude({ home: homedir() });
     if (!command) return { ...meta, error: chatError('not installed'), fallback: true };
-    chat.conversation = startChat({ command, system: chat.system, model: preferences().chatModel || 'sonnet', cwd: folder, onEvent });
+    chat.conversation = startChat({ command, system: chat.system, model: preferences().chatModel || 'sonnet', web, cwd: folder, onEvent });
   }
   chat.conversation.send(chat.prompt);
   return meta;

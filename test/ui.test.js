@@ -53,7 +53,11 @@ function mockServer() {
       // The same lab booked as two consecutive hours: shown as one 14-16 event.
       const lab = hour => { const at = new Date(tomorrow); at.setHours(hour); return icsStamp(at); };
       const labs = [[14, 15], [15, 16]].map(([from, to], index) => `BEGIN:VEVENT\r\nUID:lab${index}\r\nDTSTART:${lab(from)}\r\nDTEND:${lab(to)}\r\nSUMMARY:Robotics lab\r\nLOCATION:DEI\r\nEND:VEVENT\r\n`).join('');
-      return send(`BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:${icsStamp(start)}\r\nDTEND:${icsStamp(end)}\r\nSUMMARY:Lunch with Anna\r\nLOCATION:Cafeteria\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b\r\nDTSTART:${icsStamp(tomorrow)}\r\nSUMMARY:Project deadline\r\nEND:VEVENT\r\n${labs}END:VCALENDAR\r\n`, 'text/calendar');
+      // Three copies of the same all-day event: one row, ×3.
+      const day = at => `${at.getFullYear()}${String(at.getMonth() + 1).padStart(2, '0')}${String(at.getDate()).padStart(2, '0')}`;
+      const after = new Date(tomorrow); after.setDate(after.getDate() + 1);
+      const copies = [0, 1, 2].map(index => `BEGIN:VEVENT\r\nUID:accepted${index}\r\nDTSTART;VALUE=DATE:${day(tomorrow)}\r\nDTEND;VALUE=DATE:${day(after)}\r\nSUMMARY:Invitation accepted\r\nEND:VEVENT\r\n`).join('');
+      return send(`BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:${icsStamp(start)}\r\nDTEND:${icsStamp(end)}\r\nSUMMARY:Lunch with Anna\r\nLOCATION:Cafeteria\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b\r\nDTSTART:${icsStamp(tomorrow)}\r\nSUMMARY:Project deadline\r\nEND:VEVENT\r\n${labs}${copies}END:VCALENDAR\r\n`, 'text/calendar');
     }
     if (url.pathname.startsWith('/vt/autocompletaStazione/')) return send('PADOVA|S02581\nPADOVA CAMPO MARTE|S02650\n', 'text/plain');
     if (url.pathname.startsWith('/vt/partenze/S02581/')) return send([
@@ -229,6 +233,8 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       const labs = await ui.eval(`return [...document.querySelectorAll('.widget[data-widget="calendar"] .event')].filter(row => /Robotics lab/.test(row.innerText)).map(row => row.querySelector('.when').innerText.replace(/\\s+/g, ' '))`);
       assert.equal(labs.length, 1, 'two consecutive hours of the same lab are one event');
       assert.match(labs[0], /14.00 16.00/);
+      const accepted = await ui.eval(`return [...document.querySelectorAll('.widget[data-widget="calendar"] .event')].filter(row => /Invitation accepted/.test(row.innerText)).map(row => row.querySelector('strong').innerText)`);
+      assert.deepEqual(accepted, ['Invitation accepted ×3'], 'copies of an all-day event are one row');
       assert.equal(await ui.eval(`const w = document.querySelector('.widget[data-widget="calendar"]'); return w.draggable`), false, 'the widget must not be draggable outside its handle');
       await click('[data-route="calendar"]');
       await ui.waitFor(`document.querySelectorAll('#page-calendar .agenda-day').length >= 2`);

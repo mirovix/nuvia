@@ -7,4 +7,6 @@
   for (const [offset, text] of [[0, '23:30 - 23:50, Thesis review, Main hall'], [1, '10:00 - 11:30, Robotics lecture, DEI'], [2, 'All day, Hackathon']]) {
     const div = document.createElement('div'); div.setAttribute('data-eventid', 'e' + offset); div.setAttribute('aria-label', label(offset, text)); div.textContent = text; document.getElementById('agenda').append(div);
   }
+  // A chip whose date is only in the day's heading: Nuvia cannot tell its day.
+  const undated = document.createElement('div'); undated.setAttribute('data-eventid', 'undated'); undated.setAttribute('aria-label', '14:00 - 18:30, Arsenal FC, London'); document.getElementById('agenda').append(undated);
 </script></body></html>

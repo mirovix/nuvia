@@ -214,6 +214,10 @@ function serveFixtures(serviceSession) {
     if (url.hostname === 'flaky.nuvia.test' && fixtureFailures++ < 2) return Response.error();
     // A frame that never finishes loading (an extension's, say).
     if (url.hostname === 'hang.nuvia.test') return new Promise(() => {});
+    // Like Google's calendar export for some accounts: it works from a page of
+    // the site, and fails as net::ERR_FAILED from Nuvia's main process.
+    const zip = join(root, `${url.hostname}${url.pathname.replace(/\//g, '_')}.zip`);
+    if (existsSync(zip)) return request.referrer ? new Response(readFileSync(zip), { headers: { 'content-type': 'application/zip' } }) : Response.error();
     const json = join(root, `${url.hostname}${url.pathname.replace(/\//g, '_')}.json`);
     if (existsSync(json)) return new Response(readFileSync(json), { headers: { 'content-type': 'application/json' } });
     const html = join(root, `${url.hostname}.html`);
@@ -1405,6 +1409,11 @@ function readZipEntries(buffer) {
   });
 }
 
+async function exportedEvents(buffer, from, to) {
+  const files = await readZipEntries(buffer);
+  return files.flatMap(file => expandEvents(parseICS(file.text), from, to).map(event => ({ ...event, calendar: file.name.replace(/\.ics$/i, '').replace(/_[^_]*$/, '') })));
+}
+
 async function googleCalendarEvents(service, from, to) {
   const account = googleAccountIndex(service);
   const serviceSession = prepareSession(service.id);
@@ -1415,16 +1424,25 @@ async function googleCalendarEvents(service, from, to) {
       if (!response?.ok) continue;
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.subarray(0, 2).toString() !== 'PK') continue;
-      const files = await readZipEntries(buffer);
-      const events = files.flatMap(file => expandEvents(parseICS(file.text), from, to).map(event => ({ ...event, calendar: file.name.replace(/\.ics$/i, '').replace(/_[^_]*$/, '') })));
-      return { ok: true, events, method: 'export' };
+      return { ok: true, events: await exportedEvents(buffer, from, to), method: 'export' };
     } catch (error) { log('calendar export', service.name, error.message); }
   }
-  // Fallback: read the agenda page itself.
-  const data = await withHiddenPage(service.id, `https://calendar.google.com/calendar/u/${account}/r/agenda`, contents => run(contents, script(pageScripts.agendaText), 8000, null), { settle: 3500 });
-  if (!data) return { ok: false, events: [], message: 'Calendar unreachable' };
+  // The same download from inside a Calendar page, where it works when the
+  // request above fails; then, last, the agenda page's own text.
+  const data = await withHiddenPage(service.id, `https://calendar.google.com/calendar/u/${account}/r/agenda`, async contents => {
+    const exported = /accounts\.google\.com/.test(contents.getURL()) ? null : await run(contents, script(pageScripts.calendarExport, account), 20000, null);
+    if (exported?.ok) return { exported };
+    if (exported) log('calendar export', service.name, 'in page', exported.status);
+    return run(contents, script(pageScripts.agendaText), 8000, null);
+  }, { settle: 3500 });
+  if (data?.exported) {
+    try { return { ok: true, events: await exportedEvents(Buffer.from(data.exported.zip, 'base64'), from, to), method: 'export' }; } catch (error) { log('calendar export', service.name, 'in page', error.message); }
+  }
+  if (!data?.items) return { ok: false, events: [], message: 'Calendar unreachable' };
   if (/accounts\.google\.com/.test(data.url)) return { ok: false, events: [], loggedOut: true, message: 'Sign in to Google Calendar' };
-  return { ok: true, method: 'page', events: data.items.map(text => parseAgendaText(text)).filter(event => event.end > from && event.start < to) };
+  // The agenda shows each day's date as a heading of its own: an event whose
+  // text has no date would land on today, so it is left out.
+  return { ok: true, method: 'page', events: data.items.map(text => parseAgendaText(text)).filter(event => event.dated && event.end > from && event.start < to) };
 }
 
 async function outlookCalendarEvents(service, from, to) {

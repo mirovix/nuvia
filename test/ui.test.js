@@ -228,6 +228,7 @@ test('Nuvia: every page, widget and button', { timeout: 420000 }, async t => {
       const today = await text('.widget[data-widget="calendar"] .events');
       assert.match(today, /Lunch with Anna/);
       assert.match(today, /Thesis review/);
+      assert.doesNotMatch(today, /Arsenal/, 'an agenda chip with no date is not put on today');
       await ui.eval(`document.querySelectorAll('.widget[data-widget="calendar"] .week button')[1].click()`);
       await ui.waitFor(`/Robotics lecture/.test(document.querySelector('.widget[data-widget="calendar"] .w-body').innerText) && /Project deadline/.test(document.querySelector('.widget[data-widget="calendar"] .w-body').innerText)`);
       const labs = await ui.eval(`return [...document.querySelectorAll('.widget[data-widget="calendar"] .event')].filter(row => /Robotics lab/.test(row.innerText)).map(row => row.querySelector('.when').innerText.replace(/\\s+/g, ' '))`);

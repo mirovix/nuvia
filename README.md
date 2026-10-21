@@ -182,6 +182,7 @@ npm start
 npm test                  # unit: addresses, routing, iCal, parsers, usage, extensions
 npm run test:ui           # end-to-end on every page and button, with simulated services (Linux + xvfb)
 npm run test:chat         # right click, Ask Claude, Reply with Claude (a fake Claude Code)
+npm run test:calendar     # Google Calendar exported from the page when the direct download fails
 npm run test:integration  # against the real services: network, Chrome Web Store, Spotify DRM, WhatsApp
 ```
 

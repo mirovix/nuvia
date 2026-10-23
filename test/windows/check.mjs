@@ -42,9 +42,16 @@ const browsers = [
 ].filter(browser => existsSync(browser.exe) || (note(`${browser.name} not installed`, browser.exe), false));
 const BROWSER_PROCESSES = ['chrome.exe', 'msedge.exe', 'firefox.exe', 'iexplore.exe', 'brave.exe', 'opera.exe'];
 
+// Not spawnSync: this same process serves the page the browser asks for.
 function visit(browser, path) {
-  const run = spawnSync(browser.exe, ['--headless=new', `--user-data-dir=${browser.data}`, '--profile-directory=Default', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--dump-dom', `http://127.0.0.1:8123${path}`], { encoding: 'utf8', timeout: 60000, windowsHide: true });
-  return (run.stdout.match(/<p id="cookie">([^<]*)<\/p>/) || [])[1] || `(no page: ${String(run.stderr || run.error || '').slice(0, 200)})`;
+  return new Promise(done => {
+    let out = ''; let errors = '';
+    const child = spawn(browser.exe, ['--headless=new', `--user-data-dir=${browser.data}`, '--profile-directory=Default', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--dump-dom', `http://127.0.0.1:8123${path}`], { windowsHide: true });
+    const timer = setTimeout(() => child.kill(), 60000);
+    child.stdout.on('data', chunk => { out += chunk; });
+    child.stderr.on('data', chunk => { errors += chunk; });
+    child.on('close', () => { clearTimeout(timer); done((out.match(/<p id="cookie">([^<]*)<\/p>/) || [])[1] || `(no page: ${errors.slice(-200)})`); });
+  });
 }
 const hash = file => (existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16) : 'missing');
 const profileFiles = data => ({ cookies: hash(join(data, 'Default', 'Network', 'Cookies')), localState: hash(join(data, 'Local State')), loginData: hash(join(data, 'Default', 'Login Data')) });
@@ -74,9 +81,9 @@ const findFile = (dir, name, depth = 3) => {
 killBrowsers();
 const before = {};
 for (const browser of browsers) {
-  visit(browser, '/set');
+  await visit(browser, '/set');
   await sleep(1000);
-  const seen = visit(browser, '/echo');
+  const seen = await visit(browser, '/echo');
   check(`${browser.name}: has a session before Nuvia`, seen.includes(`nuvia_check=${token}`), seen);
   before[browser.name] = fingerprint(browser);
 }
@@ -138,7 +145,7 @@ if (uninstaller) {
   check('uninstall deletes Nuvia\'s data and sign-ins', !existsSync(dataDir), existsSync(dataDir) ? `left: ${readdirSync(dataDir).slice(0, 12).join(', ')}` : `${dataDir} deleted`);
 }
 for (const browser of browsers) {
-  const seen = visit(browser, '/echo');
+  const seen = await visit(browser, '/echo');
   check(`${browser.name}: session still there after install, use, update and uninstall`, seen.includes(`nuvia_check=${token}`), seen);
 }
 killBrowsers();

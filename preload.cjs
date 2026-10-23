@@ -10,6 +10,7 @@ const listen = channel => callback => {
 contextBridge.exposeInMainWorld('nuvia', {
   platform: process.platform,
   appInfo: invoke('app:info'),
+  openDataFolder: invoke('app:open-data'),
   minimize: invoke('window:minimize'),
   maximize: invoke('window:maximize'),
   close: invoke('window:close'),

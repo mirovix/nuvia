@@ -101,7 +101,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "artifactName": "Nuvia-Setup-${version}.${ext}"
+      "artifactName": "Nuvia-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": true
     },
     "portable": {
       "artifactName": "Nuvia-${version}-portable.${ext}"

@@ -164,7 +164,7 @@ Two optional integrations for the University of Padova, both configured in **Set
 ## Notes
 
 - **Spotify and DRM**: Nuvia is built on [Electron for Content Security](https://github.com/castlabs/electron-releases) by castlabs, which ships Widevine. On Windows and macOS some streaming services also require castlabs VMP signing to play protected content. The published builds aren't VMP-signed, so playback may not start on those systems.
-- **App data** lives in `%APPDATA%\nuvia-desktop` (Windows), `~/Library/Application Support/nuvia-desktop` (macOS) and `~/.config/nuvia-desktop` (Linux).
+- **Your data and sign-ins** live in `%APPDATA%\nuvia-desktop` (Windows), `~/Library/Application Support/nuvia-desktop` (macOS) and `~/.config/nuvia-desktop` (Linux); Settings → General → *Your data* shows the folder and opens it. Each service has a profile of its own there (`Partitions`), separate from your browser: Nuvia never reads, copies or changes the browser's cookies or sessions. Passwords you let it keep are encrypted with the system keychain (DPAPI on Windows). Uninstalling Nuvia on Windows deletes the folder (updates keep it); on macOS and Linux, delete it by hand. The portable Windows `.exe` uses the same folder and has no uninstaller.
 
 ## Development
 

@@ -66,8 +66,20 @@ function generalTab() {
     h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'Lets you sign in to Google accounts when Google says the browser may not be secure. Turn it off if a Google account keeps signing you out.'),
     h('label.check', toggle(prefs.systemNotifications !== false, value => { prefs.systemNotifications = value; savePrefs(); }), 'Also show notifications on the desktop'),
     h('label.check', toggle(prefs.autoUpdate !== false, value => { prefs.autoUpdate = value; savePrefs(); }), 'Update automatically'),
-    h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'When a fix is published, Nuvia downloads it in the background and installs it at the next restart.')
+    h('small.muted', { style: 'display:block;margin:-4px 0 8px 48px' }, 'When a fix is published, Nuvia downloads it in the background and installs it at the next restart.'),
+    dataField()
   ];
+}
+
+// Where sign-ins and settings are kept, and what happens to them on uninstall.
+function dataField() {
+  const where = h('code#data-path', '…');
+  const note = h('small', 'Each service keeps its own sign-in (cookies) here, in a profile of its own: Nuvia never reads or changes your browser’s. Saved passwords are encrypted with the system keychain.');
+  api.appInfo().then(info => {
+    where.textContent = info.userData;
+    note.append(' ', info.platform === 'win32' ? 'Uninstalling Nuvia deletes this folder; updates keep it.' : 'Delete this folder to remove them after uninstalling Nuvia.');
+  }).catch(() => {});
+  return h('div.field', h('span', 'Your data'), h('div.inline', where, h('button.btn.sm', { type: 'button', on: { click: () => api.openDataFolder() } }, icon('external-link'), 'Open folder')), note);
 }
 
 function integrationsTab() {

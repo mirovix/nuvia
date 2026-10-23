@@ -1811,6 +1811,7 @@ handle('ias:exit', () => withIasPage(async page => {
   return iasResult(after, { ok: !after.inside, message: after.inside ? 'The site did not confirm the check-out' : `Checked out of ${state.currentLab}` });
 }));
 handle('app:info', () => ({ platform: process.platform, version: app.getVersion(), userData: app.getPath('userData') }));
+handle('app:open-data', () => (TEST ? log('open data folder', app.getPath('userData')) : shell.openPath(app.getPath('userData'))));
 
 
 handle('notifications:list', () => readJson(paths.notifications(), []));

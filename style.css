@@ -706,3 +706,4 @@ body.chat-page { display: flex; flex-direction: column; background: var(--surfac
 .chat-input { display: flex; align-items: flex-end; gap: 6px; padding: 10px 10px 10px 14px; border-top: 1px solid var(--line); flex: none; }
 .chat-input textarea { resize: none; min-height: 36px; max-height: 140px; line-height: 1.4; }
 .chat-input .icon-btn { width: 36px; height: 36px; color: var(--accent); }
+#data-path { flex: 1; min-width: 0; font: 12px var(--mono); color: var(--text-2); word-break: break-all; }

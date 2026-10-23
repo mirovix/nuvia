@@ -1,0 +1,37 @@
+name: Windows check
+
+# Builds the Windows installer and checks it on a real Windows machine:
+# where Nuvia keeps its data and sign-ins, that it never touches the
+# browsers' sessions (Chrome and Edge keep theirs, no browser is opened),
+# that an update keeps the data and that uninstalling deletes it.
+# test/windows/check.mjs has the details; the results are in the job summary.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build the installer
+        run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Install, run, update and uninstall Nuvia
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist -Filter 'Nuvia-Setup-*.exe' | Select-Object -First 1
+          node test/windows/check.mjs $setup.FullName
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-check
+          path: windows-check.md
+          if-no-files-found: ignore

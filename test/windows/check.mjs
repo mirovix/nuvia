@@ -3,8 +3,9 @@
 //
 //   node test/windows/check.mjs dist/Nuvia-Setup-<version>.exe
 //
-// 1. Chrome and Edge get a session (a cookie from a local site) in their own
-//    default profile, and their cookie stores are fingerprinted.
+// 1. Chrome and Edge get a session (a cookie from a local site) in a browser
+//    profile, and the cookie stores of that profile and of their default one
+//    are fingerprinted. (Headless, a browser hangs on its default profile.)
 // 2. Nuvia is installed, started with Gmail, Outlook, Teams, WhatsApp and
 //    Claude, left to load them for a while, then closed.
 // 3. The browsers' cookie stores must be untouched, the session still there,
@@ -36,18 +37,18 @@ const server = createServer((request, response) => {
 await new Promise(done => server.listen(8123, '127.0.0.1', done));
 
 const browsers = [
-  { name: 'Chrome', exe: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', data: join(LOCALAPPDATA, 'Google', 'Chrome', 'User Data') },
-  { name: 'Edge', exe: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', data: join(LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data') }
+  { name: 'Chrome', exe: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', data: join(LOCALAPPDATA, 'NuviaCheck', 'Chrome'), defaultData: join(LOCALAPPDATA, 'Google', 'Chrome', 'User Data') },
+  { name: 'Edge', exe: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', data: join(LOCALAPPDATA, 'NuviaCheck', 'Edge'), defaultData: join(LOCALAPPDATA, 'Microsoft', 'Edge', 'User Data') }
 ].filter(browser => existsSync(browser.exe) || (note(`${browser.name} not installed`, browser.exe), false));
 const BROWSER_PROCESSES = ['chrome.exe', 'msedge.exe', 'firefox.exe', 'iexplore.exe', 'brave.exe', 'opera.exe'];
 
 function visit(browser, path) {
-  // The browser's real default profile, so the session is the one a user has.
   const run = spawnSync(browser.exe, ['--headless=new', `--user-data-dir=${browser.data}`, '--profile-directory=Default', '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--dump-dom', `http://127.0.0.1:8123${path}`], { encoding: 'utf8', timeout: 60000, windowsHide: true });
   return (run.stdout.match(/<p id="cookie">([^<]*)<\/p>/) || [])[1] || `(no page: ${String(run.stderr || run.error || '').slice(0, 200)})`;
 }
 const hash = file => (existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 16) : 'missing');
-const fingerprint = browser => ({ cookies: hash(join(browser.data, 'Default', 'Network', 'Cookies')), localState: hash(join(browser.data, 'Local State')), loginData: hash(join(browser.data, 'Default', 'Login Data')) });
+const profileFiles = data => ({ cookies: hash(join(data, 'Default', 'Network', 'Cookies')), localState: hash(join(data, 'Local State')), loginData: hash(join(data, 'Default', 'Login Data')) });
+const fingerprint = browser => ({ session: profileFiles(browser.data), default: profileFiles(browser.defaultData) });
 const running = () => {
   const out = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8' }).stdout || '';
   return out.split('\n').map(line => line.split('","')[0]?.replace(/^"/, '').toLowerCase()).filter(Boolean);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, forgetCodexLimits, codexLockdownArgs } from '../../lib/claude-chat.js';
+import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, forgetCodexLimits, codexLockdownArgs, voicePrompt, voiceSystem } from '../../lib/claude-chat.js';
 
 const fake = resolve(import.meta.dirname, '..', 'fixtures', 'fake-claude.mjs');
 
@@ -189,4 +189,13 @@ test('a chat reply sees who wrote each message, the user\'s own marked [me]', ()
   assert.match(system, /<reply>/);
   assert.match(system, /language of the conversation/);
   assert.match(system, /The user is Miro/);
+});
+
+test('a voice message is summarized from its transcript, in the user\'s language', () => {
+  assert.equal(voicePrompt({ chat: 'Mum', from: 'Mum', seconds: 31.6, text: ' Ciao, vieni a cena? ' }), 'Chat: Mum\nFrom: Mum\nLength: 32 s\n\nVoice message transcript:\n"""\nCiao, vieni a cena?\n"""\n\nSummarize this voice message.');
+  assert.equal(voicePrompt({ text: 'ok' }), 'Voice message transcript:\n"""\nok\n"""\n\nSummarize this voice message.');
+  const system = voiceSystem({ language: 'Italian', name: 'Miro' });
+  assert.match(system, /Talk to the user in Italian/);
+  assert.match(system, /recognition mistakes/);
+  assert.match(system, /<reply>/);
 });

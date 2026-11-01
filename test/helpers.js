@@ -84,7 +84,8 @@ export async function launch({ prepare, env: extraEnv = {}, width = 1480, height
       throw new Error('Page not found');
     },
     async ui() {
-      const page = await app.page(target => target.type === 'page' && /index\.html$/.test(target.url));
+      // A busy computer can take half a minute to start Electron.
+      const page = await app.page(target => target.type === 'page' && /index\.html$/.test(target.url), 60000);
       await page.waitFor('window.__nuviaReady === true', { timeout: 30000 });
       return page;
     },

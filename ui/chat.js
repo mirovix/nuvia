@@ -35,17 +35,17 @@ function markdown(source) {
 
 function draftCard(reply, done) {
   return h('div.chat-draft',
-    h('div.chat-draft-head', icon(meta.mode === 'message' ? 'message-circle' : 'mail'), h('span', meta.mode === 'message' ? 'Message draft' : 'Reply draft')),
+    h('div.chat-draft-head', icon(meta.mode === 'mail' ? 'mail' : 'message-circle'), h('span', meta.mode === 'mail' ? 'Reply draft' : 'Message draft')),
     h('div.chat-draft-text', reply),
     done ? h('div.chat-draft-actions',
-      meta.canInsert ? h('button.btn.sm.accent', { type: 'button', on: { click: event => insert(reply, event.currentTarget) } }, icon('reply'), meta.mode === 'message' ? 'Put in the chat' : 'Insert into reply') : null,
+      meta.canInsert ? h('button.btn.sm.accent', { type: 'button', on: { click: event => insert(reply, event.currentTarget) } }, icon('reply'), meta.mode === 'mail' ? 'Insert into reply' : 'Put in the chat') : null,
       h('button.btn.sm', { type: 'button', on: { click: event => copy(reply, event.currentTarget) } }, icon('copy'), 'Copy')) : null);
 }
 
 // An answer: Markdown around the reply draft, which Claude puts between <reply> tags.
 function renderAnswer(el, source, done, status = '') {
   const shown = done ? source : source.replace(/<\/?[a-z]*$/i, '');
-  const parts = meta.mode === 'mail' || meta.mode === 'message' ? shown.split(/(<reply>[\s\S]*?(?:<\/reply>|$))/) : [shown];
+  const parts = ['mail', 'message', 'voice'].includes(meta.mode) ? shown.split(/(<reply>[\s\S]*?(?:<\/reply>|$))/) : [shown];
   fill(el, ...parts.filter(part => part.trim()).map(part => {
     const reply = part.match(/^<reply>([\s\S]*?)(<\/reply>)?$/);
     if (reply) return draftCard(reply[1].trim(), done || Boolean(reply[2]));
@@ -99,6 +99,13 @@ chat.onEvent(event => {
     current.text += event.text;
     renderAnswer(current.el, current.text, false);
     if (follow) log.scrollTop = log.scrollHeight;
+  } else if (event.type === 'transcript') {
+    // A voice message's transcript, above the summary that follows.
+    const card = h('div.chat-draft.chat-transcript',
+      h('div.chat-draft-head', icon('message-circle'), h('span', `Transcript${event.seconds ? ` · ${Math.max(1, Math.round(event.seconds))} s` : ''}`)),
+      h('div.chat-draft-text', event.text || '(no speech)'),
+      event.text ? h('div.chat-draft-actions', h('button.btn.sm', { type: 'button', on: { click: click => copy(event.text, click.currentTarget) } }, icon('copy'), 'Copy')) : null);
+    if (current) log.insertBefore(card, current.el); else log.append(card);
   } else if (event.type === 'status') {
     // Searching the web: what was written before was a preamble.
     if (!current) current = { el: addMessage('assistant', ''), text: '' };
@@ -133,11 +140,12 @@ document.body.dataset.mode = meta.mode;
 $('#chat-title').textContent = meta.title || 'Claude';
 $('#chat-sub').textContent = meta.sub || '';
 if (meta.quote) { const quote = $('#chat-context'); quote.textContent = meta.quote; quote.hidden = false; }
-text.placeholder = meta.mode === 'ask' ? 'Ask a follow-up…' : `Answer ${meta.provider || 'Claude'}, or say what to change…`;
-if (meta.mode === 'mail' || meta.mode === 'message') {
+text.placeholder = meta.mode === 'ask' ? 'Ask a follow-up…' : meta.mode === 'voice' ? 'Ask about it, or say what to reply…' : `Answer ${meta.provider || 'Claude'}, or say what to change…`;
+if (['mail', 'message', 'voice'].includes(meta.mode)) {
   const chips = $('#chat-chips');
-  const labels = meta.mode === 'mail' ? ['Write it now', 'Shorter', 'More formal', 'In English', 'In Italian'] : ['Shorter', 'Warmer', 'More formal', 'In English', 'In Italian'];
-  fill(chips, ...labels.map(label => h('button.chip', { type: 'button', on: { click: () => send(label === 'Write it now' ? 'Write the reply now with what you have.' : `${label}, please.`) } }, label)));
+  const labels = { mail: ['Write it now', 'Shorter', 'More formal', 'In English', 'In Italian'], message: ['Shorter', 'Warmer', 'More formal', 'In English', 'In Italian'], voice: ['Draft a reply', 'More detail', 'In English', 'In Italian'] }[meta.mode];
+  const ask = { 'Write it now': 'Write the reply now with what you have.', 'Draft a reply': 'Write a reply to this voice message.', 'More detail': 'Summarize it in more detail.' };
+  fill(chips, ...labels.map(label => h('button.chip', { type: 'button', on: { click: () => send(ask[label] || `${label}, please.`) } }, label)));
   chips.hidden = false;
 }
 if (meta.error) {

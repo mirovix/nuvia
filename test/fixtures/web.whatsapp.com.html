@@ -14,7 +14,14 @@
     main.querySelector('header').textContent = row.innerText.split('\n')[0];
     // The open conversation, marked up like WhatsApp Web: incoming and outgoing bubbles.
     main.querySelector('#log').innerHTML = [['in', '14:00, 21/10/2026', 'Mum', 'Are you coming for dinner tonight?'], ['out', '14:01, 21/10/2026', 'Me', 'Probably yes'], ['in', '14:02, 21/10/2026', 'Mum', 'Remember the bread']]
-      .map(([way, time, from, text]) => `<div role="row" class="message-${way}"><div class="copyable-text" data-pre-plain-text="[${time}] ${from}: "><span class="selectable-text">${text}</span></div></div>`).join('');
+      .map(([way, time, from, text]) => `<div role="row" class="message-${way}"><div class="copyable-text" data-pre-plain-text="[${time}] ${from}: "><span class="selectable-text">${text}</span></div></div>`).join('')
+      // A voice message: like WhatsApp, it loads when played, in an audio element outside the page.
+      + '<div role="row" class="message-in" id="voice"><div style="display:flex;gap:8px;align-items:center;height:42px"><button aria-label="Play voice message"><span data-icon="audio-play">▶</span></button><span>0:02</span></div></div>';
+    main.querySelector('#voice button').addEventListener('click', async () => {
+      const blob = await (await fetch('/voice.ogg')).blob();
+      window.voice = new Audio(URL.createObjectURL(blob));
+      window.voice.play().catch(() => {});
+    });
   }));
   document.querySelector('footer button').addEventListener('click', () => {
     const box = document.querySelector('footer [contenteditable]');

@@ -681,6 +681,7 @@ body.chat-page { display: flex; flex-direction: column; background: var(--surfac
 .chat-log { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
 .chat-msg.user { align-self: flex-end; max-width: 85%; padding: 7px 11px; border-radius: 12px 12px 4px 12px; background: var(--accent-soft); white-space: pre-wrap; }
 .chat-msg.assistant { display: flex; flex-direction: column; gap: 10px; }
+.chat-transcript .chat-draft-text { font-size: 13px; line-height: 1.5; color: var(--text-2); max-height: 220px; overflow-y: auto; }
 .chat-msg.note { padding: 8px 11px; border-radius: 10px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: var(--text); font-size: 12.5px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; white-space: pre-wrap; }
 .chat-md p { margin: 0 0 7px; }
 .chat-md p:last-child { margin-bottom: 0; }

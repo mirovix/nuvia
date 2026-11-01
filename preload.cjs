@@ -92,6 +92,7 @@ contextBridge.exposeInMainWorld('nuvia', {
   restartToUpdate: invoke('update:restart'),
   onUpdate: listen('update:state'),
   debugState: invoke('debug:state'),
+  debugUiZoom: invoke('debug:ui-zoom'),
   debugMenu: invoke('debug:menu'),
   debugMenuClick: invoke('debug:menu-click'),
   debugMenuClear: invoke('debug:menu-clear'),

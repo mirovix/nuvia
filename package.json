@@ -1,6 +1,6 @@
 {
   "name": "nuvia-desktop",
-  "version": "0.6.27",
+  "version": "0.6.28",
   "private": true,
   "description": "Tutti i tuoi servizi web in una finestra, con sessioni persistenti. Windows, macOS e Linux.",
   "author": {
@@ -32,7 +32,8 @@
     "test:streak": "node --test --test-concurrency=1 test/streak-reconnect.test.js",
     "test:views": "node --test --test-concurrency=1 test/views.test.js",
     "test:calendar": "node --test --test-concurrency=1 test/calendar-export.test.js",
-    "test:extension-scripts": "node --test --test-concurrency=1 test/extension-scripts.test.js"
+    "test:extension-scripts": "node --test --test-concurrency=1 test/extension-scripts.test.js",
+    "postinstall": "node scripts/fetch-whisper.mjs"
   },
   "devDependencies": {
     "@fontsource-variable/instrument-sans": "^5.3.0",
@@ -40,7 +41,8 @@
     "@fontsource/instrument-serif": "^5.3.0",
     "electron": "github:castlabs/electron-releases#v37.10.3+wvcus",
     "electron-builder": "^26.0.12",
-    "lucide-static": "^1.48.0"
+    "lucide-static": "^1.48.0",
+    "onnxruntime-web": "1.31.0-dev.20260914-8d85527a0"
   },
   "build": {
     "appId": "it.nuvia.desktop",
@@ -56,6 +58,9 @@
       "preload-chat.cjs",
       "index.html",
       "chat.html",
+      "whisper.html",
+      "preload-whisper.cjs",
+      "vendor/**/*",
       "style.css",
       "lib/**/*",
       "ui/**/*",
@@ -132,7 +137,17 @@
     "dmg": {
       "artifactName": "Nuvia-${version}-mac-${arch}.${ext}"
     },
-    "afterPack": "scripts/after-pack.cjs"
+    "afterPack": "scripts/after-pack.cjs",
+    "extraResources": [
+      {
+        "from": "node_modules/onnxruntime-web/dist",
+        "to": "whisper",
+        "filter": [
+          "ort-wasm-simd-threaded.asyncify.mjs",
+          "ort-wasm-simd-threaded.asyncify.wasm"
+        ]
+      }
+    ]
   },
   "dependencies": {
     "leaflet": "^1.9.4",

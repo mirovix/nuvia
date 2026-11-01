@@ -2,6 +2,8 @@ import { app, BrowserWindow, WebContentsView, ipcMain, dialog, session, net, she
 import { join, extname, resolve, sep, dirname, delimiter, basename } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, rmSync, createWriteStream, appendFileSync, accessSync, realpathSync, constants as fsConstants } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { homedir, userInfo } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import yauzl from 'yauzl';
@@ -14,7 +16,7 @@ import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-status
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
 import { readInfo, defaultRules, extensionHosts, hostAllowed, contentScriptsRunOn } from './lib/extensions.js';
 import { prepareExtension } from './lib/extension-shim.js';
-import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat } from './lib/claude-chat.js';
+import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, voicePrompt, voiceSystem } from './lib/claude-chat.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
@@ -220,9 +222,14 @@ function serveFixtures(serviceSession) {
     const zip = join(root, `${url.hostname}${url.pathname.replace(/\//g, '_')}.zip`);
     if (existsSync(zip)) return request.referrer ? new Response(readFileSync(zip), { headers: { 'content-type': 'application/zip' } }) : Response.error();
     const json = join(root, `${url.hostname}${url.pathname.replace(/\//g, '_')}.json`);
+    const audio = join(root, `${url.hostname}${url.pathname.replace(/\//g, '_')}`);
+    if (/\.(ogg|mp3|m4a|wav)$/.test(url.pathname) && existsSync(audio)) return new Response(readFileSync(audio), { headers: { 'content-type': 'audio/ogg' } });
     if (existsSync(json)) return new Response(readFileSync(json), { headers: { 'content-type': 'application/json' } });
     const html = join(root, `${url.hostname}.html`);
     if (existsSync(html)) return new Response(readFileSync(html), { headers: { 'content-type': 'text/html; charset=utf-8' } });
+    // A made-up test host with no page of its own: answered here, never looked
+    // up (some networks take 40 s to say a name does not exist).
+    if (url.hostname.endsWith('.nuvia.test')) return new Response(`<!doctype html><title>${url.hostname}</title>`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     return net.fetch(request, { bypassCustomProtocolHandlers: true });
   });
 }
@@ -984,8 +991,72 @@ function migrate() {
   writeJson(paths.preferences(), { ...prefs, migrations: [...done] });
 }
 
-// Map tiles come through the main process (see lib/tiles.js).
-protocol.registerSchemesAsPrivileged([{ scheme: 'nuvia-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
+// Map tiles come through the main process (see lib/tiles.js); nuvia-app serves
+// the speech recognition page (whisper.html), which must be its own secure origin.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'nuvia-tile', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+  { scheme: 'nuvia-app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+]);
+
+// ---------------------------------------------------------------------------
+// Voice messages: speech recognition on this computer (whisper.html, ui/whisper.js)
+
+const WHISPER_PARTITION = 'persist:nuvia-whisper';
+// ONNX Runtime's files, from the onnxruntime-web devDependency (packaged as resources/whisper).
+const WHISPER_RUNTIME = ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm'];
+function whisperFile(name) {
+  if (name === 'whisper.html') return join(import.meta.dirname, 'whisper.html');
+  if (name === 'whisper.js') return join(import.meta.dirname, 'ui', 'whisper.js');
+  if (name === 'transformers.min.js') return join(import.meta.dirname, 'vendor', 'whisper', name);
+  if (!WHISPER_RUNTIME.includes(name)) return null;
+  return app.isPackaged ? join(process.resourcesPath, 'whisper', name) : join(import.meta.dirname, 'node_modules', 'onnxruntime-web', 'dist', name);
+}
+const WHISPER_TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm' };
+let whisperServed = false;
+function serveWhisper() {
+  if (whisperServed) return;
+  whisperServed = true;
+  session.fromPartition(WHISPER_PARTITION).protocol.handle('nuvia-app', async request => {
+    const file = whisperFile(new URL(request.url).pathname.slice(1));
+    if (!file || !existsSync(file)) { log('whisper', 'missing file', request.url); return new Response('Not found', { status: 404 }); }
+    // Cross-origin isolated (several threads for the model); the model comes from Hugging Face.
+    return new Response(await readFile(file), { headers: {
+      'Content-Type': WHISPER_TYPES[extname(file)] || 'application/octet-stream',
+      'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp', 'Cross-Origin-Resource-Policy': 'same-origin',
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data: https:"
+    } });
+  });
+}
+
+let whisperWindow = null; let whisperLoaded = null; let whisperIdle = null;
+const whisperJobs = new Map(); // id → { done, progress }
+function whisperPage() {
+  if (whisperWindow && !whisperWindow.isDestroyed()) return whisperLoaded;
+  serveWhisper();
+  const window = whisperWindow = new BrowserWindow({ show: false, webPreferences: { partition: WHISPER_PARTITION, preload: join(import.meta.dirname, 'preload-whisper.cjs'), sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+  const stopped = message => { for (const job of whisperJobs.values()) job.done({ error: message }); whisperJobs.clear(); };
+  window.on('closed', () => { if (whisperWindow === window) whisperWindow = null; stopped('The speech recognizer stopped.'); });
+  window.webContents.on('render-process-gone', (_, details) => { log('whisper', 'stopped', details.reason); if (!window.isDestroyed()) window.destroy(); });
+  window.webContents.on('console-message', event => { if (event.level === 'error' || event.level === 3) log('whisper', String(event.message).slice(0, 300)); });
+  whisperLoaded = window.loadURL(`nuvia-app://whisper/whisper.html${process.env.NUVIA_WHISPER_FAKE ? '?fake' : ''}`);
+  return whisperLoaded;
+}
+ipcMain.on('whisper:progress', (_, id, value) => whisperJobs.get(id)?.progress(value));
+ipcMain.on('whisper:result', (_, id, result) => { const job = whisperJobs.get(id); whisperJobs.delete(id); job?.done(result || { error: 'No answer' }); });
+// Transcribes audio (any format Chromium plays). onProgress gets the model
+// download's percent the first time, then 'transcribing'. The model stays loaded
+// for ten minutes after the last voice message, then its memory is given back.
+async function transcribe(bytes, onProgress = () => {}) {
+  clearTimeout(whisperIdle);
+  try { await whisperPage(); } catch (error) { return { error: `The speech recognizer did not start: ${error.message}` }; }
+  const id = randomUUID();
+  const result = await new Promise(done => {
+    whisperJobs.set(id, { done, progress: onProgress });
+    whisperWindow.webContents.send('whisper:job', { id, audio: new Uint8Array(bytes) });
+  });
+  whisperIdle = setTimeout(() => { if (!whisperJobs.size) whisperWindow?.destroy(); }, 10 * 60000);
+  return result;
+}
 
 function serveMapTiles() {
   // Node's fetch: Chromium's net.fetch refuses a Referer header set by hand.
@@ -1134,7 +1205,11 @@ handle('window:close', () => mainWindow.close());
 handle('window:state', () => ({ maximized: mainWindow.isMaximized() }));
 
 handle('view:bounds', rect => {
-  const next = { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.max(0, Math.round(rect.width)), height: Math.max(0, Math.round(rect.height)) };
+  // The UI measures in its own CSS pixels. Zoomed (Ctrl+- in the UI, which
+  // Chromium remembers), those are not the window's: at 91 % every service page
+  // came out 9 % too big, its bottom (the message box) below the window.
+  const zoom = mainWindow.webContents.getZoomFactor() || 1;
+  const next = { x: Math.round(rect.x * zoom), y: Math.round(rect.y * zoom), width: Math.max(0, Math.round(rect.width * zoom)), height: Math.max(0, Math.round(rect.height * zoom)) };
   if (!next.width || !next.height) return;
   hostBounds = next;
   const active = views.get(activeKey);
@@ -1957,7 +2032,7 @@ let lastMenu = null; // tests: the last menu built, clicked through debug:menu-c
 const chatProvider = () => (preferences().chatProvider === 'codex' ? 'codex' : 'claude');
 const providerName = () => (chatProvider() === 'codex' ? 'ChatGPT' : 'Claude');
 const shortText = (text, max = 28) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line; };
-function contextMenu(contents, params, service, { ask = true } = {}) {
+async function contextMenu(contents, params, service, { ask = true } = {}) {
   const { editFlags = {}, selectionText = '', linkURL = '', srcURL = '', mediaType, isEditable, misspelledWord, dictionarySuggestions = [] } = params;
   const selection = selectionText.trim();
   const items = [];
@@ -1968,6 +2043,12 @@ function contextMenu(contents, params, service, { ask = true } = {}) {
     { label: 'Add to dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(misspelledWord) }
   ]);
   if (selection && ask) section([{ label: `Ask ${providerName()} about “${shortText(selection)}”`, click: () => openAskChat(contents, selection) }]);
+  // A voice message under the mouse in a chat app: transcribe it.
+  if (service && serviceGroup(service) === 'message' && !isEditable && !selection) {
+    const zoom = contents.getZoomFactor() || 1;
+    const voice = await run(contents, script(pageScripts.voiceMessage, serviceKind(service), Math.round(params.x / zoom), Math.round(params.y / zoom)), 500, null);
+    if (voice?.found) section([{ label: 'Transcribe voice message', click: () => openVoiceChat(service, contents, params.x / zoom, params.y / zoom) }]);
+  }
   if (service && ['mail', 'message'].includes(serviceGroup(service)) && !isEditable) section([{ label: `Reply with ${providerName()}`, click: () => openReplyChat(service.id).then(result => { if (!result.opened) notifyRenderer('toast', result.reason); }) }]);
   if (/^https?:/i.test(linkURL)) section([
     { label: 'Open link in browser', click: () => openOutside(linkURL) },
@@ -2027,8 +2108,8 @@ function openChat(options) {
   const cursor = screen.getCursorScreenPoint();
   const area = screen.getDisplayNearestPoint(cursor).workArea;
   let bounds;
-  if (options.mode === 'ask') {
-    const width = 420; const height = 400;
+  if (options.mode === 'ask' || options.mode === 'voice') {
+    const width = 420; const height = options.mode === 'voice' ? 520 : 400;
     const below = cursor.y + 14 + height <= area.y + area.height;
     bounds = { width, height, x: clamp(cursor.x - 40, area.x, area.x + area.width - width), y: clamp(below ? cursor.y + 14 : cursor.y - height - 10, area.y, area.y + area.height - height) };
   } else {
@@ -2054,6 +2135,29 @@ function openChat(options) {
   window.once('ready-to-show', () => window.show());
   window.loadFile('chat.html');
   return window;
+}
+// "Transcribe voice message": the window opens at once and shows each step.
+function openVoiceChat(service, contents, x, y) {
+  openChat({ mode: 'voice', serviceId: service.id, title: 'Voice message', sub: service.name, quote: '', prompt: null,
+    system: voiceSystem({ language: chatLanguage(), name: preferences().name }), voice: { contents, kind: serviceKind(service), x: Math.round(x), y: Math.round(y) } });
+}
+async function transcribeVoice(chat, send) {
+  const { contents, kind, x, y } = chat.voice;
+  const fail = (message, detail = message) => { log('voice', chat.sub, detail); send({ type: 'error', message }); return false; };
+  if (!contents || contents.isDestroyed()) return fail('The chat is closed.');
+  send({ type: 'status', text: 'Getting the voice message…' });
+  const voice = await run(contents, script(pageScripts.voiceMessage, kind, x, y, true), 30000, null);
+  if (!voice?.ok) return fail(voice?.reason || 'Nuvia could not get the voice message: play it once, then try again.');
+  send({ type: 'status', text: 'Transcribing on this computer…' });
+  const started = Date.now();
+  const result = await transcribe(Buffer.from(voice.audio, 'base64'), value => send({ type: 'status', text: value === 'transcribing' ? 'Transcribing on this computer…' : `Downloading the speech model (first time only)… ${value}%` }));
+  if (result.error) return fail(`The voice message could not be transcribed: ${result.error}`);
+  log('voice', chat.sub, `${Math.round(result.seconds)} s transcribed in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+  send({ type: 'transcript', text: result.text, seconds: result.seconds });
+  if (!result.text) return fail('There is no speech in this voice message.', 'no speech');
+  send({ type: 'status', text: 'Summarizing…' });
+  chat.prompt = voicePrompt({ chat: voice.chat, from: voice.from, seconds: result.seconds, text: result.text });
+  return true;
 }
 function openAskChat(contents, selection) {
   const host = hostOf(contents.getURL());
@@ -2119,8 +2223,9 @@ ipcMain.handle('chat:start', event => {
   const chat = chatFor(event);
   if (!chat) return { error: 'This chat has ended.' };
   const provider = chat.provider;
-  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: chat.mode === 'mail' || chat.mode === 'message', provider: provider === 'codex' ? 'ChatGPT' : 'Claude', ...chatTheme() };
-  if (chat.conversation) return meta;
+  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: ['mail', 'message', 'voice'].includes(chat.mode), provider: provider === 'codex' ? 'ChatGPT' : 'Claude', ...chatTheme() };
+  if (chat.started) return meta;
+  chat.started = true;
   const folder = fileInProfile('claude-chat');
   mkdirSync(folder, { recursive: true });
   const send = value => { if (!chat.window.isDestroyed()) chat.window.webContents.send('chat:event', value); };
@@ -2130,19 +2235,34 @@ ipcMain.handle('chat:start', event => {
   };
   // "Ask" may search the web; "Reply" works on an email only and stays offline.
   const web = chat.mode === 'ask';
-  if (provider === 'codex') {
-    const command = process.env.NUVIA_CODEX_CHAT_BIN ? { command: process.env.NUVIA_CODEX_CHAT_BIN, args: [] } : findCodex({ home: homedir() });
-    if (!command) return { ...meta, error: chatError('not installed', 'codex'), fallback: true };
-    const extra = String(process.env.NUVIA_CODEX_HOMES || '').split(delimiter).filter(Boolean); // tests
-    // Accounts the Claude & Codex page already knows are at their limit go last.
-    const full = home => { const live = codexLive.get(home)?.value; return Boolean(live?.limitReached || live?.session?.percent >= 100 || live?.weekly?.percent >= 100); };
-    const homes = codexHomes({ home: TEST ? undefined : homedir(), primary: CODEX_HOME, extra }).sort((a, b) => full(a) - full(b));
-    chat.conversation = startCodexChat({ command, homes, system: chat.system, web, cwd: folder, onEvent });
-  } else {
-    const command = process.env.NUVIA_CLAUDE_BIN || findClaude({ home: homedir() });
-    if (!command) return { ...meta, error: chatError('not installed'), fallback: true };
-    chat.conversation = startChat({ command, system: chat.system, model: preferences().chatModel || 'sonnet', web, cwd: folder, onEvent });
+  // Starts Claude or ChatGPT; an error message when its CLI is missing.
+  const converse = () => {
+    if (provider === 'codex') {
+      const command = process.env.NUVIA_CODEX_CHAT_BIN ? { command: process.env.NUVIA_CODEX_CHAT_BIN, args: [] } : findCodex({ home: homedir() });
+      if (!command) return chatError('not installed', 'codex');
+      const extra = String(process.env.NUVIA_CODEX_HOMES || '').split(delimiter).filter(Boolean); // tests
+      // Accounts the Claude & Codex page already knows are at their limit go last.
+      const full = home => { const live = codexLive.get(home)?.value; return Boolean(live?.limitReached || live?.session?.percent >= 100 || live?.weekly?.percent >= 100); };
+      const homes = codexHomes({ home: TEST ? undefined : homedir(), primary: CODEX_HOME, extra }).sort((a, b) => full(a) - full(b));
+      chat.conversation = startCodexChat({ command, homes, system: chat.system, web, cwd: folder, onEvent });
+    } else {
+      const command = process.env.NUVIA_CLAUDE_BIN || findClaude({ home: homedir() });
+      if (!command) return chatError('not installed');
+      chat.conversation = startChat({ command, system: chat.system, model: preferences().chatModel || 'sonnet', web, cwd: folder, onEvent });
+    }
+    return null;
+  };
+  // A voice message: its transcript first (on this computer), then the summary.
+  if (chat.mode === 'voice') {
+    transcribeVoice(chat, send).then(ready => {
+      if (!ready || chat.window.isDestroyed()) return;
+      const error = converse();
+      if (error) send({ type: 'error', message: error, fallback: true }); else chat.conversation.send(chat.prompt);
+    });
+    return meta;
   }
+  const error = converse();
+  if (error) return { ...meta, error, fallback: true };
   chat.conversation.send(chat.prompt);
   return meta;
 });
@@ -2153,7 +2273,7 @@ ipcMain.handle('chat:insert', async (event, text) => {
   const chat = chatFor(event);
   const service = chat && serviceById(chat.serviceId);
   const contents = chat && views.get(chat.serviceId)?.webContents;
-  const message = chat?.mode === 'message';
+  const message = chat?.mode === 'message' || chat?.mode === 'voice';
   if (!service || !contents || contents.isDestroyed()) return { ok: false, reason: `The ${message ? 'chat' : 'mailbox'} is closed: use Copy.` };
   // Typing needs the page focused, not the chat window.
   mainWindow.focus(); contents.focus();
@@ -2173,7 +2293,8 @@ ipcMain.handle('chat:open-claude', event => {
 });
 
 if (TEST) {
-  handle('debug:state', () => ({ activeKey, overlayDepth, children: mainWindow.contentView.children.length, made: Object.fromEntries([...new Set(madeViews)].map(key => [key, madeViews.filter(item => item === key).length])), attached: Boolean(views.get(activeKey) && attached(views.get(activeKey))), views: [...views.keys()], hostBounds, uiExtensions: session.defaultSession.extensions.getAllExtensions().length }));
+  handle('debug:state', () => ({ activeKey, overlayDepth, children: mainWindow.contentView.children.length, made: Object.fromEntries([...new Set(madeViews)].map(key => [key, madeViews.filter(item => item === key).length])), attached: Boolean(views.get(activeKey) && attached(views.get(activeKey))), views: [...views.keys()], hostBounds, content: mainWindow.getContentBounds(), uiExtensions: session.defaultSession.extensions.getAllExtensions().length }));
+  handle('debug:ui-zoom', factor => { mainWindow.webContents.setZoomFactor(factor); return true; });
   handle('debug:menu', () => (lastMenu ? lastMenu.items.filter(item => item.label).map(item => ({ label: item.label, enabled: item.enabled })) : null));
   handle('debug:menu-click', label => { const item = lastMenu?.items.find(entry => entry.label === label); if (!item) return false; item.click(); return true; });
   handle('debug:menu-clear', () => { lastMenu = null; });

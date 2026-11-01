@@ -196,3 +196,71 @@ test('Reply with Claude in WhatsApp: the draft goes into the message box, unsent
     reply?.close(); wa?.close(); ui?.close(); await app.close();
   }
 });
+
+// Right click on a voice message in a chat app: "Transcribe voice message".
+// Nuvia gets its audio from the page (played muted and stopped at once), the
+// speech recognizer page decodes it (NUVIA_WHISPER_FAKE skips only the model),
+// then Claude summarizes the transcript and can draft a reply.
+// With NUVIA_TEST_VOICE=<audio file> and NUVIA_TEST_VOICE_EXPECT=<regex>, the
+// real model runs on that file (it is downloaded the first time).
+test('Transcribe a voice message in WhatsApp, summarize it, draft a reply', { timeout: 900000 }, async () => {
+  const real = process.env.NUVIA_TEST_VOICE;
+  const app = await launch({
+    prepare: profile => {
+      const fixtures = join(profile, 'fixtures');
+      cpSync(join(project, 'test', 'fixtures'), fixtures, { recursive: true });
+      if (real) cpSync(real, join(fixtures, 'web.whatsapp.com_voice.ogg'));
+      process.env.NUVIA_FIXTURES = fixtures;
+      process.env.FAKE_CLAUDE_LOG = join(profile, 'claude.log');
+      writeProfile(profile, { 'services.json': [{ id: 'wa', name: 'WhatsApp', url: 'https://web.whatsapp.com/' }], 'preferences.json': { chatLanguage: 'Italian', name: 'Miro' } });
+    },
+    env: { NUVIA_CLAUDE_BIN: join(project, 'test', 'fixtures', 'fake-claude.mjs'), ...(real ? {} : { NUVIA_WHISPER_FAKE: '1' }) }
+  });
+  const nuviaLog = () => { try { return readFileSync(join(app.profile, 'nuvia.log'), 'utf8'); } catch { return ''; } };
+  const claudeSaw = () => { try { return readFileSync(join(app.profile, 'claude.log'), 'utf8').trim().split('\n').map(line => JSON.parse(line)); } catch { return []; } };
+  const menuAt = async selector => {
+    const { x, y } = await wa.eval(`const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }`);
+    await ui.eval('await window.nuvia.debugMenuClear(); return true');
+    await ui.eval(`return window.nuvia.debugRightClick({ key: 'wa', x: ${x}, y: ${y} })`);
+    return (await ui.waitFor('window.nuvia.debugMenu()', { timeout: 5000 })).map(item => item.label);
+  };
+  let ui; let wa; let voice;
+  try {
+    ui = await app.ui();
+    await ui.eval(`document.querySelector('.service[data-id="wa"]').click(); return true`);
+    wa = await app.page(target => target.type === 'page' && target.url.startsWith('https://web.whatsapp.com'), 30000);
+    await wa.waitFor(`document.querySelector('#pane-side [role="gridcell"]')`);
+    await wa.eval(`document.querySelector('#pane-side [role="gridcell"]').click(); return true`);
+    await wa.waitFor(`document.querySelector('#voice button')`);
+    // A text message offers no transcription; a voice message does.
+    assert.ok(!(await menuAt('#main .message-out .selectable-text')).includes('Transcribe voice message'));
+    const labels = await menuAt('#voice span[data-icon]');
+    assert.ok(labels.includes('Transcribe voice message'), labels.join(', '));
+    await ui.eval(`return window.nuvia.debugMenuClick('Transcribe voice message')`);
+    voice = await app.page(target => target.type === 'page' && target.url.endsWith('chat.html'), 15000);
+    await voice.waitFor(`document.querySelector('.chat-transcript .chat-draft-text')`, { timeout: real ? 840000 : 30000 });
+    const transcript = await voice.eval(`return document.querySelector('.chat-transcript .chat-draft-text').textContent`);
+    if (real) assert.match(transcript, new RegExp(process.env.NUVIA_TEST_VOICE_EXPECT || '.', 'i'), transcript);
+    else assert.equal(transcript, '(test transcript, 2.0 s)', 'the audio reached the recognizer and was decoded (2 s)');
+    assert.equal(await wa.eval('return window.voice.paused'), true, 'the voice message was stopped at once');
+    await wa.waitFor('window.voice.muted === false', { timeout: 3000 });
+    await voice.waitFor(`/Mamma chiede/.test(document.querySelector('.chat-msg.assistant')?.innerText || '')`, { timeout: 20000 });
+    const prompt = claudeSaw().filter(line => line.user).at(-1).user;
+    assert.match(prompt, /^Chat: Mum\n/);
+    assert.ok(prompt.includes(`Voice message transcript:\n"""\n${transcript}\n"""`), prompt);
+    assert.match(claudeSaw().filter(line => line.argv).at(-1).system, /voice message/);
+    assert.equal(claudeSaw().filter(line => line.argv).at(-1).argv.at(claudeSaw().filter(line => line.argv).at(-1).argv.indexOf('--tools') + 1), '', 'no tools, no web');
+    // A reply, into the message box (not sent).
+    await voice.eval(`[...document.querySelectorAll('.chat-chips button')].find(b => b.textContent === 'Draft a reply').click(); return true`);
+    await voice.waitFor(`document.querySelector('.chat-draft-actions .btn.accent')`, { timeout: 20000 });
+    await voice.eval(`document.querySelector('.chat-draft-actions .btn.accent').click(); return true`);
+    await voice.waitFor(`document.querySelector('.chat-draft-actions .btn.accent').textContent.includes('Inserted')`, { timeout: 15000 });
+    assert.equal(await wa.eval(`return document.querySelector('#main footer [contenteditable]').innerText.trim()`), 'Sì, vengo a cena e porto il pane!');
+    assert.equal(await wa.eval('return window.sent.length'), 0);
+    assert.match(nuviaLog(), /voice WhatsApp \d+ s transcribed in/);
+  } catch (error) {
+    throw new Error(`${error.message}\n--- Nuvia log ---\n${nuviaLog().slice(-2500)}\n--- Electron log ---\n${app.output().slice(-2500)}`);
+  } finally {
+    voice?.close(); wa?.close(); ui?.close(); await app.close();
+  }
+});

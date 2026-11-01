@@ -164,7 +164,7 @@ test('Reply with Claude in WhatsApp: the draft goes into the message box, unsent
       process.env.FAKE_CLAUDE_LOG = join(profile, 'claude.log');
       writeProfile(profile, { 'services.json': [{ id: 'wa', name: 'WhatsApp', url: 'https://web.whatsapp.com/' }], 'preferences.json': { chatLanguage: 'Italian', name: 'Miro' } });
     },
-    env: { NUVIA_CLAUDE_BIN: join(project, 'test', 'fixtures', 'fake-claude.mjs') }
+    env: { NUVIA_CLAUDE_BIN: join(project, 'test', 'fixtures', 'fake-claude.mjs'), NUVIA_WHISPER_FAKE: '1' }
   });
   const nuviaLog = () => { try { return readFileSync(join(app.profile, 'nuvia.log'), 'utf8'); } catch { return ''; } };
   const claudeSaw = () => { try { return readFileSync(join(app.profile, 'claude.log'), 'utf8').trim().split('\n').map(line => JSON.parse(line)); } catch { return []; } };
@@ -184,11 +184,21 @@ test('Reply with Claude in WhatsApp: the draft goes into the message box, unsent
     assert.match(await reply.eval(`return document.querySelector('.chat-draft-actions .btn.accent').textContent`), /Put in the chat/);
     const prompt = claudeSaw().filter(line => line.user).at(-1).user;
     assert.match(prompt, /^Chat: Mum \(WhatsApp\)/);
-    assert.match(prompt, /\[Mum\] 14:00, 21\/10\/2026\nAre you coming for dinner tonight\?\n\n\[me\] 14:01, 21\/10\/2026\nProbably yes\n\n\[Mum\] 14:02, 21\/10\/2026\nRemember the bread/);
+    assert.match(prompt, /\[Mum\] 14:00, 21\/10\/2026\nAre you coming for dinner tonight\?\n\n\[me\] 14:01, 21\/10\/2026\nProbably yes\n\n\[Mum\] 14:02, 21\/10\/2026\nRemember the bread\n\n\[Mum\]\n\(voice message, not transcribed\)\n/);
     assert.match(claudeSaw().filter(line => line.argv).at(-1).system, /answer a chat/);
-    await reply.eval(`document.querySelector('.chat-draft-actions .btn.accent').click(); return true`);
-    await reply.waitFor(`document.querySelector('.chat-draft-actions .btn.accent').textContent.includes('Inserted')`, { timeout: 15000 });
-    assert.equal(await wa.eval(`return document.querySelector('#main footer [contenteditable]').innerText.trim()`), 'Sì, vengo a cena e porto il pane!');
+    // The chat has a voice message: transcribe it, and the reply is written again.
+    await reply.waitFor(`[...document.querySelectorAll('.chat-chips button')].some(b => b.textContent === 'Transcribe the voice message' && !b.disabled)`, { timeout: 10000 });
+    await reply.eval(`[...document.querySelectorAll('.chat-chips button')].find(b => b.textContent === 'Transcribe the voice message').click(); return true`);
+    await reply.waitFor(`document.querySelector('.chat-transcript')`, { timeout: 30000 });
+    assert.equal(await reply.eval(`return document.querySelector('.chat-transcript .chat-draft-head').textContent`), 'Transcript · Mum · 2 s');
+    assert.equal(await reply.eval(`return document.querySelector('.chat-transcript .chat-draft-text').textContent`), '(test transcript, 2.0 s)');
+    await reply.waitFor(`[...document.querySelectorAll('.chat-draft-text')].some(node => node.textContent === 'Sì, vengo a cena e porto il pane! A dopo') && !document.getElementById('chat-send').disabled`, { timeout: 20000 });
+    assert.match(claudeSaw().filter(line => line.user).at(-1).user, /^The voice messages in this chat, transcribed automatically[^]*\[Mum\], 2 s\n"""\n\(test transcript, 2\.0 s\)\n"""/);
+    assert.equal(await wa.eval('return window.voice.paused'), true);
+    assert.ok(!(await reply.eval(`return [...document.querySelectorAll('.chat-chips button')].map(b => b.textContent)`)).some(label => /Transcribe/.test(label)), 'the button goes once used');
+    await reply.eval(`[...document.querySelectorAll('.chat-draft-actions .btn.accent')].at(-1).click(); return true`);
+    await reply.waitFor(`[...document.querySelectorAll('.chat-draft-actions .btn.accent')].at(-1).textContent.includes('Inserted')`, { timeout: 15000 });
+    assert.equal(await wa.eval(`return document.querySelector('#main footer [contenteditable]').innerText.trim()`), 'Sì, vengo a cena e porto il pane! A dopo');
     assert.equal(await wa.eval('return window.sent.length'), 0, 'put in the box, not sent');
   } catch (error) {
     throw new Error(`${error.message}\n--- Nuvia log ---\n${nuviaLog().slice(-2000)}\n--- Electron log ---\n${app.output().slice(-2500)}`);

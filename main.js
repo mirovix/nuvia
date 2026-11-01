@@ -16,7 +16,7 @@ import { claudeStatusLineScript, withNuviaStatusLine } from './lib/claude-status
 import { codexHomes, findCodex, readCodexLive } from './lib/codex-live.js';
 import { readInfo, defaultRules, extensionHosts, hostAllowed, contentScriptsRunOn } from './lib/extensions.js';
 import { prepareExtension } from './lib/extension-shim.js';
-import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, voicePrompt, voiceSystem } from './lib/claude-chat.js';
+import { askPrompt, askSystem, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, voicePrompt, voiceSystem, voiceTranscriptsPrompt } from './lib/claude-chat.js';
 import { serviceKind, serviceGroup } from './lib/kinds.js';
 import { chromeUserAgent, firefoxUserAgent, isGoogleSignIn } from './lib/useragent.js';
 import * as pageScripts from './lib/scripts.js';
@@ -2046,7 +2046,7 @@ async function contextMenu(contents, params, service, { ask = true } = {}) {
   // A voice message under the mouse in a chat app: transcribe it.
   if (service && serviceGroup(service) === 'message' && !isEditable && !selection) {
     const zoom = contents.getZoomFactor() || 1;
-    const voice = await run(contents, script(pageScripts.voiceMessage, serviceKind(service), Math.round(params.x / zoom), Math.round(params.y / zoom)), 500, null);
+    const voice = await run(contents, script(pageScripts.voiceMessage, serviceKind(service), { x: Math.round(params.x / zoom), y: Math.round(params.y / zoom) }), 500, null);
     if (voice?.found) section([{ label: 'Transcribe voice message', click: () => openVoiceChat(service, contents, params.x / zoom, params.y / zoom) }]);
   }
   if (service && ['mail', 'message'].includes(serviceGroup(service)) && !isEditable) section([{ label: `Reply with ${providerName()}`, click: () => openReplyChat(service.id).then(result => { if (!result.opened) notifyRenderer('toast', result.reason); }) }]);
@@ -2146,7 +2146,7 @@ async function transcribeVoice(chat, send) {
   const fail = (message, detail = message) => { log('voice', chat.sub, detail); send({ type: 'error', message }); return false; };
   if (!contents || contents.isDestroyed()) return fail('The chat is closed.');
   send({ type: 'status', text: 'Getting the voice message…' });
-  const voice = await run(contents, script(pageScripts.voiceMessage, kind, x, y, true), 30000, null);
+  const voice = await run(contents, script(pageScripts.voiceMessage, kind, { x, y }, true), 30000, null);
   if (!voice?.ok) return fail(voice?.reason || 'Nuvia could not get the voice message: play it once, then try again.');
   send({ type: 'status', text: 'Transcribing on this computer…' });
   const started = Date.now();
@@ -2190,8 +2190,8 @@ async function openMessageChat(serviceId) {
     log('reply with claude', service.name, 'could not read the chat', thread?.reason || 'the page did not answer');
     return { opened: false, reason: thread?.reason || 'Nuvia could not read the chat: open it and try again.' };
   }
-  const last = thread.messages.filter(item => !item.mine).at(-1);
-  openChat({ mode: 'message', serviceId, title: `Reply with ${providerName()}`, sub: thread.title || service.name,
+  const last = thread.messages.filter(item => !item.mine && item.text).at(-1);
+  openChat({ mode: 'message', serviceId, voices: thread.messages.filter(item => item.voice != null).map(item => ({ index: item.voice, from: item.mine ? 'me' : item.from, time: item.time })), title: `Reply with ${providerName()}`, sub: thread.title || service.name,
     quote: `${thread.title || service.name}${last?.text ? ` — ${last.text.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`,
     system: messageSystem({ language: chatLanguage(), name: preferences().name }), prompt: messagePrompt({ ...thread, app: CHAT_APPS[serviceKind(service)] || service.name }) });
   return { opened: true };
@@ -2223,7 +2223,7 @@ ipcMain.handle('chat:start', event => {
   const chat = chatFor(event);
   if (!chat) return { error: 'This chat has ended.' };
   const provider = chat.provider;
-  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: ['mail', 'message', 'voice'].includes(chat.mode), provider: provider === 'codex' ? 'ChatGPT' : 'Claude', ...chatTheme() };
+  const meta = { mode: chat.mode, title: chat.title, sub: chat.sub, quote: chat.quote, canInsert: ['mail', 'message', 'voice'].includes(chat.mode), voices: chat.voices?.length || 0, provider: provider === 'codex' ? 'ChatGPT' : 'Claude', ...chatTheme() };
   if (chat.started) return meta;
   chat.started = true;
   const folder = fileInProfile('claude-chat');
@@ -2265,6 +2265,35 @@ ipcMain.handle('chat:start', event => {
   if (error) return { ...meta, error, fallback: true };
   chat.conversation.send(chat.prompt);
   return meta;
+});
+// "Transcribe voice messages" in a chat's Reply window: the conversation's last
+// five, one after the other, then their transcripts go to Claude, which writes
+// the reply again.
+ipcMain.handle('chat:transcribe-voices', async event => {
+  const chat = chatFor(event);
+  const send = value => { if (chat && !chat.window.isDestroyed()) chat.window.webContents.send('chat:event', value); };
+  const service = chat && serviceById(chat.serviceId);
+  const contents = chat && views.get(chat.serviceId)?.webContents;
+  if (!chat?.voices?.length || !chat.conversation) return { ok: false };
+  if (!service || !contents || contents.isDestroyed()) { send({ type: 'error', message: 'The chat is closed.' }); return { ok: false }; }
+  const list = chat.voices.slice(-5);
+  const done = [];
+  for (const [number, item] of list.entries()) {
+    const step = `Transcribing voice message ${number + 1} of ${list.length}…`;
+    send({ type: 'status', text: step });
+    const voice = await run(contents, script(pageScripts.voiceMessage, serviceKind(service), { index: item.index }, true), 30000, null);
+    if (!voice?.ok) { log('voice', service.name, 'reply', voice?.reason || 'the page did not answer'); done.push({ ...item, error: voice?.reason || 'it could not be read' }); continue; }
+    const result = await transcribe(Buffer.from(voice.audio, 'base64'), value => send({ type: 'status', text: value === 'transcribing' ? step : `Downloading the speech model (first time only)… ${value}%` }));
+    if (result.error) { log('voice', service.name, 'reply', result.error); done.push({ ...item, error: result.error }); continue; }
+    send({ type: 'transcript', text: result.text, seconds: result.seconds, label: [item.from, item.time].filter(Boolean).join(', ') });
+    done.push({ ...item, text: result.text, seconds: result.seconds });
+  }
+  if (!done.some(item => item.text != null)) { send({ type: 'error', message: `The voice messages could not be transcribed: ${done[0]?.error || 'unknown error'}` }); return { ok: false }; }
+  log('voice', service.name, `reply: ${done.filter(item => item.text != null).length} of ${list.length} voice messages transcribed`);
+  chat.voices = [];
+  send({ type: 'status', text: 'Writing the reply again…' });
+  chat.conversation.send(voiceTranscriptsPrompt(done));
+  return { ok: true };
 });
 ipcMain.handle('chat:send', (event, text) => { chatFor(event)?.conversation?.send(String(text || '').slice(0, 20000)); });
 ipcMain.handle('chat:copy', (_, text) => { clipboard.writeText(String(text || '')); return true; });

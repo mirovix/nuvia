@@ -102,7 +102,7 @@ chat.onEvent(event => {
   } else if (event.type === 'transcript') {
     // A voice message's transcript, above the summary that follows.
     const card = h('div.chat-draft.chat-transcript',
-      h('div.chat-draft-head', icon('message-circle'), h('span', `Transcript${event.seconds ? ` · ${Math.max(1, Math.round(event.seconds))} s` : ''}`)),
+      h('div.chat-draft-head', icon('message-circle'), h('span', ['Transcript', event.label, event.seconds ? `${Math.max(1, Math.round(event.seconds))} s` : ''].filter(Boolean).join(' · '))),
       h('div.chat-draft-text', event.text || '(no speech)'),
       event.text ? h('div.chat-draft-actions', h('button.btn.sm', { type: 'button', on: { click: click => copy(event.text, click.currentTarget) } }, icon('copy'), 'Copy')) : null);
     if (current) log.insertBefore(card, current.el); else log.append(card);
@@ -146,6 +146,18 @@ if (['mail', 'message', 'voice'].includes(meta.mode)) {
   const labels = { mail: ['Write it now', 'Shorter', 'More formal', 'In English', 'In Italian'], message: ['Shorter', 'Warmer', 'More formal', 'In English', 'In Italian'], voice: ['Draft a reply', 'More detail', 'In English', 'In Italian'] }[meta.mode];
   const ask = { 'Write it now': 'Write the reply now with what you have.', 'Draft a reply': 'Write a reply to this voice message.', 'More detail': 'Summarize it in more detail.' };
   fill(chips, ...labels.map(label => h('button.chip', { type: 'button', on: { click: () => send(ask[label] || `${label}, please.`) } }, label)));
+  // A chat with voice messages: transcribe them (on this computer) so the reply takes them into account.
+  if (meta.mode === 'message' && meta.voices) {
+    const count = Math.min(meta.voices, 5);
+    const voices = h('button.chip.accent', { type: 'button', title: 'Transcribed on this computer. Each one is played muted for an instant to load it: the app shows it as played.', on: { click: () => {
+      if (busy) return;
+      voices.remove();
+      current = { el: addMessage('assistant', ''), text: '' };
+      setBusy(true);
+      chat.transcribeVoices();
+    } } }, icon('message-circle'), count === 1 ? 'Transcribe the voice message' : `Transcribe ${count} voice messages`);
+    chips.prepend(voices);
+  }
   chips.hidden = false;
 }
 if (meta.error) {

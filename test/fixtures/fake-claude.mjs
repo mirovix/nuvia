@@ -16,6 +16,7 @@ out({ type: 'system', subtype: 'init', session_id: 'fake' });
 
 function answer(text) {
   if (/What is this\?/.test(text)) return 'La **fotosintesi** è il processo con cui le piante trasformano la luce in energia.';
+  if (/The voice messages in this chat, transcribed/.test(text)) return 'Il vocale chiede anche il pane.\n<reply>Sì, vengo a cena e porto il pane! A dopo</reply>';
   if (/Summarize this voice message/.test(text)) return 'Mamma chiede se vieni a cena e di portare il pane.';
   if (/Write a reply to this voice message/.test(text)) return '<reply>Sì, vengo a cena e porto il pane!</reply>';
   if (/Help me reply to this chat/.test(text)) return 'Ecco una risposta:\n<reply>Sì, vengo a cena e porto il pane!</reply>';

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, forgetCodexLimits, codexLockdownArgs, voicePrompt, voiceSystem } from '../../lib/claude-chat.js';
+import { askPrompt, askSystem, claudeArgs, extractReply, findClaude, mailPrompt, mailSystem, messagePrompt, messageSystem, startChat, startCodexChat, forgetCodexLimits, codexLockdownArgs, voicePrompt, voiceSystem, voiceTranscriptsPrompt } from '../../lib/claude-chat.js';
 
 const fake = resolve(import.meta.dirname, '..', 'fixtures', 'fake-claude.mjs');
 
@@ -198,4 +198,10 @@ test('a voice message is summarized from its transcript, in the user\'s language
   assert.match(system, /Talk to the user in Italian/);
   assert.match(system, /recognition mistakes/);
   assert.match(system, /<reply>/);
+});
+
+test('voice messages in a chat: marked in the thread, then their transcripts', () => {
+  assert.equal(messagePrompt({ title: 'Mum', messages: [{ from: 'Mum', text: 'Hi' }, { from: 'Mum', voice: 0, text: '' }] }), 'Chat: Mum\n\n[Mum]\nHi\n\n[Mum]\n(voice message, not transcribed)\n\nHelp me reply to this chat.');
+  assert.equal(voiceTranscriptsPrompt([{ from: 'Mum', time: '14:03', seconds: 12.4, text: ' Porta il pane ' }, { from: 'me', error: 'it could not be read' }]),
+    'The voice messages in this chat, transcribed automatically (there may be recognition mistakes), oldest first:\n\n[Mum] 14:03, 12 s\n"""\nPorta il pane\n"""\n\n[me]\n(could not be transcribed: it could not be read)\n\nTake them into account: say in one line what they add, then write the reply again between the tags.');
 });

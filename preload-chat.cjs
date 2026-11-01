@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('nuviaChat', {
+  transcribeVoices: () => ipcRenderer.invoke('chat:transcribe-voices'),
   start: () => ipcRenderer.invoke('chat:start'),
   send: text => ipcRenderer.invoke('chat:send', text),
   insert: text => ipcRenderer.invoke('chat:insert', text),
